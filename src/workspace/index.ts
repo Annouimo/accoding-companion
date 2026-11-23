@@ -55,7 +55,7 @@ export async function readContestRoster(
   const legacy = await optional(await safePath(root,
     `contests/${idSchema.parse(id)}/contest.json`));
   const modern = await optional(await safePath(root,
-    `.better-accoding/rosters/${idSchema.parse(id)}.json`));
+    `.accoding/contests/${idSchema.parse(id)}.json`));
   const raw = modern ?? legacy;
   if (raw === undefined) return;
   const parsed = rosterSchema.safeParse(raw);
@@ -111,33 +111,27 @@ export async function writeContestRoster(
   };
   if (new Set(roster.problems.map((p) => p.id)).size !== roster.problems.length)
     throw Error("比赛题目 ID 重复。");
-  const friendly = await optional(await safePath(root,
-    ".better-accoding/friendly-layout.json"));
-  const destination = friendly?.version === 1
-    ? `.better-accoding/rosters/${idSchema.parse(snapshot.id)}.json`
-    : `contests/${idSchema.parse(snapshot.id)}/contest.json`;
+  const destination = `.accoding/contests/${idSchema.parse(snapshot.id)}.json`;
   await atomicWrite(await safePath(root, destination),
     JSON.stringify(roster, null, 2));
 }
 /** Derived index: binding transactions are authoritative. Caller holds the workspace lock. */
 export async function writeWorkspaceIndex(root: string) {
-  const destination = await safePath(root, ".better-accoding/workspace.json");
+  const destination = await safePath(root, ".accoding/index.json");
   const existing = await optional(destination);
   if (existing !== undefined && !workspaceSchema.safeParse(existing).success)
     throw Error("工作区索引版本未知或损坏，原文件已保留。");
   let files: string[] = [];
   try {
-    files = await fs.readdir(await safePath(root, ".better-accoding/bindings"));
+    files = await fs.readdir(await safePath(root, ".accoding/bindings"));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
   const bindings: Binding[] = [];
-  const friendly = await optional(await safePath(root,
-    ".better-accoding/friendly-layout.json"));
   for (const file of files.sort()) {
     if (!/^((?:admin-)?problem-\d+|contest-\d+-\d+)\.json$/.test(file)) continue;
     const binding = bindingSchema.parse(
-      await optional(await safePath(root, `.better-accoding/bindings/${file}`)),
+      await optional(await safePath(root, `.accoding/bindings/${file}`)),
     );
     if (
       binding.bindingId !== file.slice(0, -5) ||
@@ -165,9 +159,7 @@ export async function writeWorkspaceIndex(root: string) {
               : [],
           ),
         ),
-      ].map((id) => ({ id, metadataFile: friendly?.version === 1
-        ? `.better-accoding/rosters/${id}.json`
-        : `contests/${id}/contest.json` })),
+      ].map((id) => ({ id, metadataFile: `.accoding/contests/${id}.json` })),
     },
     null,
     2,

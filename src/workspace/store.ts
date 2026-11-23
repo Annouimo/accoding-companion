@@ -49,12 +49,12 @@ export class WorkspaceStore {
   private file(id: string) {
     if (!/^((?:admin-)?problem-\d+|contest-\d+-\d+)$/.test(id))
       throw new Error("无效题目绑定。");
-    return safePath(this.root, `.better-accoding/bindings/${id}.json`);
+    return safePath(this.root, `.accoding/bindings/${id}.json`);
   }
   private serialize<T>(action: () => Promise<T>): Promise<T> {
     const task = this.pending.then(async () =>
       withWorkspaceLock(
-        await safePath(this.root, ".better-accoding/write.lock"),
+        await safePath(this.root, ".accoding/write.lock"),
         async () => {
           await writeWorkspaceIndex(this.root);
           const result = await action();
@@ -70,8 +70,8 @@ export class WorkspaceStore {
     return this.serialize(async () => {
       const ids = new Set<string>();
       for (const relative of [
-        ".better-accoding/bindings",
-        ".better-accoding/transactions",
+        ".accoding/bindings",
+        ".accoding/transactions",
       ]) {
         try {
           for (const file of await fs.readdir(
@@ -140,7 +140,7 @@ export class WorkspaceStore {
       // Back up the original format before the first file-model transaction.
       const backup = await safePath(
         this.root,
-        `.better-accoding/backups/${id}-${hash(rawJSON)}.json`,
+        `.accoding/backups/${id}-${hash(rawJSON)}.json`,
       );
       try {
         await fs.writeFile(backup, rawJSON, { flag: "wx", mode: 0o600 });
@@ -221,21 +221,23 @@ export class WorkspaceStore {
     return safePath(this.root, caseFile(binding, caseId, kind));
   }
   private async ensureSources(problem: Problem, directory?: string) {
-    const files = directory
-      ? { c: `${directory}/main.c`, cpp: `${directory}/main.cpp` }
-      : defaultSourceFiles(problem.target);
-    for (const [relative, template] of [
-      [files.c, cTemplate],
-      [files.cpp, cppTemplate],
-    ]) {
-      const file = await safePath(this.root, relative);
-      await fs.mkdir(path.dirname(file), { recursive: true });
-      try {
-        await fs.writeFile(file, template, { flag: "wx" });
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      }
+    const config = JSON.parse(await fs.readFile(path.join(
+      this.root, ".accoding", "workspace.json"), "utf8")) as {
+        kind?: string; language?: "c" | "cpp";
+      };
+    if (config.kind !== "course" || !["c", "cpp"].includes(config.language || ""))
+      throw new Error("课程工作区配置缺失或不兼容。");
+    const files = directory ? { c: path.posix.join(directory, "main.c"),
+      cpp: path.posix.join(directory, "main.cpp") } : defaultSourceFiles(problem.target);
+    const [relative, template] = config.language === "c"
+      ? [files.c, cTemplate] : [files.cpp, cppTemplate];
+    const file = await safePath(this.root, relative);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    try { await fs.writeFile(file, template, { flag: "wx" }); }
+    catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
     }
+    return relative;
   }
   async import(problem: Problem, directory?: string): Promise<Binding> {
     return this.serialize(async () => {
@@ -251,11 +253,7 @@ export class WorkspaceStore {
         if (!marker.endsWith(path.join(directory, "main.c")))
           throw new Error("Invalid problem source directory");
       }
-      await this.ensureSources(problem, directory);
-      const files = directory
-        ? { c: `${directory}/main.c`, cpp: `${directory}/main.cpp` }
-        : defaultSourceFiles(problem.target);
-      const sourceFile = problem.languages.includes("c") ? files.c : files.cpp;
+      const sourceFile = await this.ensureSources(problem, directory);
       const binding: Binding = {
         schemaVersion: 2,
         comparisonDefaultsVersion: 1,

@@ -18,11 +18,11 @@ export function caseFile(
   kind: "input" | "expected",
 ) {
   if (!/^[a-zA-Z0-9-]+$/.test(id)) throw new Error("无效用例 ID。");
-  return `${problemDirectory(binding)}/tests/${id}.${kind === "input" ? "in" : "out"}`;
+  return `.accoding/cases/${binding.bindingId}/${id}.${kind === "input" ? "in" : "out"}`;
 }
 function contents(binding: Binding) {
   const files: Record<string, string> = {};
-  const directory = problemDirectory(binding);
+  const directory = `.accoding/cases/${binding.bindingId}`;
   for (const c of binding.cases) {
     c.inputFile = caseFile(binding, c.id, "input");
     c.expectedOutputFile = c.hasExpectedOutput
@@ -71,7 +71,7 @@ function contents(binding: Binding) {
     null,
     2,
   );
-  files[`${directory}/problem.json`] = JSON.stringify(
+  files[`.accoding/problems/${binding.bindingId}.json`] = JSON.stringify(
     {
       schemaVersion: 2,
       bindingId: binding.bindingId,
@@ -90,7 +90,7 @@ function contents(binding: Binding) {
     2,
   );
   files[
-    `${directory}/${binding.problem.statement.format === "markdown" ? "problem.md" : "statement.html"}`
+    `.accoding/problems/${binding.bindingId}.${binding.problem.statement.format === "markdown" ? "md" : "html"}`
   ] =
     binding.problem.statement.format === "markdown"
       ? binding.problem.statement.content
@@ -122,8 +122,8 @@ async function readOptional(
 }
 const digest = (value: string | undefined) =>
   value === undefined ? null : hash(value);
-const metadataPath = (id: string) => `.better-accoding/bindings/${id}.json`;
-const journalPath = (id: string) => `.better-accoding/transactions/${id}.json`;
+const metadataPath = (id: string) => `.accoding/bindings/${id}.json`;
+const journalPath = (id: string) => `.accoding/transactions/${id}.json`;
 
 /** Caller holds the workspace lock. Replay only recognized old/new bytes. */
 export async function recoverCaseTransaction(root: string, id: string) {
