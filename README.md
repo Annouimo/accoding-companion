@@ -1,27 +1,75 @@
 # Accoding Companion
 
-非官方 Accoding 终端编程助手。独立于原 VS Code 插件 `Annouimo/better-accoding-for-buaaers`。
+独立的、**非官方** Accoding 命令行／终端编程助手。用于导入课程比赛、管理 C99/C++17 源码、本地评测及提交到 OJ。此项目与 Accoding、北航没有官方隶属关系。
 
-> 开发分支进行中；**尚未正式发布到 npm**。与北航或 Accoding 官方无隶属关系。
+> **开发预览版。** 代码尚未完成 Mac/Windows 实机验收；两个 npm 包目前均标记为 `private`，**不能通过 npm 安装正式版本**。请勿将预览版视为考试或课程官方工具。
 
-## 目标
+## 产品设计
 
-- **课程工作区**：一个目录、多场比赛；工作区统一 C99 或 C++17
-- 题目目录保留 `main.c` / `main.cpp`、`题目.md`；内部数据集中隐藏
-- 本地评测、不可变提交源码、OJ 状态恢复
-- C99 与独立维护的 [C Exam Kit](https://github.com/Annouimo/c-exam-kit) 配置联动
-- Node.js LTS、npm 发行；安装器负责软件与脚手架包的版本检查
+- **一个课程工作区，多场比赛。** 初次配置工作区时指定 C99 或 C++17，比赛创建在该目录的独立子文件夹；用户自己的文件夹保持不变。
+- **题目可见文件精简。** 每道题默认生成 `main.c`（或 `main.cpp`）、`题目.md`，C99 另外生成小型 `exam.h` 入口。
+- **内部数据隐藏。** 工作区根目录 `.accoding/` 保存题目与样例元数据、脚手架快照、不可变提交源码及提交历史。已有的普通文件不会被程序接管。
+- **本地测试与 OJ 使用同一份代码。** C99 在测试前按需展开脚手架，生成内容哈希标识的源码快照；测试通过后确认提交时复用该快照。
+- **全屏 Ink TUI + 独立 CLI。** 默认恢复最近使用的题目，面包屑显示课程／比赛／题目；窗口较小时可以使用经典菜单，编辑器通过 `test`、`submit` 调用 CLI。
+- **安装器是唯一联网版本检查入口。** TUI 不自动查软件或脚手架更新；只能将本机已经下载的 C Exam Kit 版本按范围应用到题目。
 
-## 开发
+## 本地开发与预览
+
+需要 Node.js 22.12+、npm、C 编译器（GCC 或 Clang）。首版正式发行计划以已验证的 Node LTS 为准，**无需 Bun**。
 
 ```sh
 npm install
 npm run typecheck
 npm test
 npm run build
-node dist/accoding.cjs --help
+node dist/accoding.mjs --help
+node dist/accoding.mjs --version
+node dist/accoding.mjs
 ```
 
-当前处于基础迁移阶段。请不要把开发中的 `0.2.0-next.0` 当作已发布版本。
+要模拟发行包，可以运行 `npm pack --dry-run`；由于脚本包含发布前打包，不会自动发布到 npm。
 
-源码迁移保留了原项目的 MIT 许可证与第三方许可说明。
+从命令行初始化一个新的 C99 课程目录：
+
+```sh
+node dist/accoding.mjs login
+node dist/accoding.mjs contest init <比赛ID或链接> --root "/path/to/C语言课程" --workspace-lang c
+```
+
+之后再导入其他比赛只需 `contest init ID`，默认沿用最近工作区。首次以 TUI 交互初始化时会提示选择工作区目录和语言。
+
+编辑器的典型命令：
+
+```sh
+node dist/accoding.mjs test "/path/to/C语言课程/某次作业/A-题目/main.c"
+node dist/accoding.mjs submit "/path/to/C语言课程/某次作业/A-题目/main.c"
+node dist/accoding.mjs status --watch
+```
+
+## 安装与更新（正式发布后）
+
+未来提供 [install.sh](install.sh)（macOS/Linux）和 [install.ps1](install.ps1)（Windows）。用户主动运行安装器时：
+
+1. 检测 Node.js/npm，缺失时征求同意并提供官方安装途径；
+2. 查询 npm 上主程序和 C Exam Kit 数据包的可用版本；
+3. 选择一起更新，或使用 `--software-only`、`--preset-only`；
+4. 下载安装，验证后保留已有课程数据和题目快照。
+
+主程序包：`@annouimo/accoding-companion`；C99 数据包：`@annouimo/c-exam-kit-preset`。两者目前都**未正式发布**；直接运行安装器查询会得到包不存在的提示。
+
+脚手架下载后可以在 TUI 中设为课程默认版本，并选择更新 **所有空题目／所有未 AC 题目／所有题目／自选题目**。每题保留备份及单独撤销；不会重写 `main.c` 和 `题目.md`。
+
+## 数据迁移与安全
+
+旧项目的工作区不自动迁移。可以手动尝试**只复制、不删除源目录**的迁移命令：
+
+```sh
+node dist/accoding.mjs workspace migrate "/path/to/old" \
+  --root "/path/to/new-course" --workspace-lang c
+```
+
+迁移前仍建议备份。当前该功能覆盖绑定、源码、样例和题目笔记，提交历史和账号状态需要进一步核实；遇到冲突会报告跳过，不会清除旧文件。详见 [工作区说明](docs/architecture.md)。
+
+运行用户代码并不构成安全沙箱；程序使用当前用户权限编译、运行本地源码。运行和材料使用是否被课程考试规则允许，需要另行确认。登录凭据应存储在操作系统安全设施而不是课程目录中。详见 [发行与验收清单](docs/release.md)。
+
+本项目从 [better-accoding-for-buaaers](https://github.com/Annouimo/better-accoding-for-buaaers) 的独立 CLI 分支整理而来，旧 VS Code 扩展仓库保留。迁移代码及第三方依赖许可见 [LICENSE](LICENSE) 和 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
