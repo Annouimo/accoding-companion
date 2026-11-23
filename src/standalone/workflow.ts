@@ -209,7 +209,7 @@ export class StandaloneWorkflow {
     const currentCode = await fs.readFile(sourceFor(binding, root), "utf8");
     const starter = currentCode === cTemplate || currentCode === cppTemplate ||
       (currentCode.endsWith(cTemplate) &&
-        /^#include "[A-Za-z_][A-Za-z0-9_.-]*\\.h"\\n$/.test(
+        /^#include "[A-Za-z_][A-Za-z0-9_.-]*\.h"\n$/.test(
           currentCode.slice(0, -cTemplate.length)));
     // Never label a previously edited solution as "empty" simply because
     // it does not yet have an initialization hash (old workspace / migration).
