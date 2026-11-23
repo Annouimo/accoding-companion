@@ -11,6 +11,9 @@ export async function ask(question: string, defaultValue?: string): Promise<stri
     if (defaultValue !== undefined) return defaultValue;
     throw new Error("This command requires a terminal. Provide its arguments explicitly.");
   }
+  // Ink unmount can unref the shared TTY handle before a readline prompt.
+  // Keep the input handle alive until readline finishes reading the answer.
+  stdin.ref();
   const rl = createInterface({ input: stdin, output: stdout });
   try {
     const value = (await rl.question(
@@ -31,6 +34,7 @@ export async function password(question = "密码"): Promise<string> {
   emitKeypressEvents(stdin);
   stdin.setRawMode(true);
   stdin.resume();
+  stdin.ref();
   return await new Promise<string>((resolve, reject) => {
     let input = "";
     const cleanup = () => {
@@ -63,17 +67,18 @@ export async function select(
 ): Promise<string | undefined> {
   if (!interactive()) throw new Error("Menu interaction requires an interactive terminal.");
   while (true) {
-    console.log("\n" + title);
-    options.forEach((option, index) => console.log(
-      "  " + (index + 1) + ". " + option.label
+    // Prompts must stay visible even while the TUI captures normal log output.
+    stdout.write("\n" + title + "\n");
+    options.forEach((option, index) => stdout.write(
+      "  " + (index + 1) + ". " + option.label + "\n"
     ));
-    console.log("  0. 返回");
+    stdout.write("  0. 返回\n");
     const raw = await ask("选择编号", String(defaultIndex + 1));
     const number = Number(raw);
     if (raw === "0") return undefined;
     if (Number.isInteger(number) && number >= 1 && number <= options.length)
       return options[number - 1].value;
-    console.log("无效的编号。");
+    stdout.write("无效的编号。\n");
   }
 }
 
