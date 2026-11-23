@@ -4,6 +4,7 @@ declare const __ACCODING_VERSION__: string;
 import path from "node:path";
 import { configDirectory } from "./state";
 import { startFullScreenTui } from "./tui";
+import { migrateLegacyWorkspace } from "./migrate";
 import { spawn } from "node:child_process";
 import { StandaloneWorkflow, type ResolvedProblem } from "./workflow";
 import { ask, confirm, interactive, select } from "./terminal";
@@ -39,6 +40,7 @@ function usage() {
     "  --root DIR                       指定工作区（初始化/同步/查询）",
     "  --preset MANIFEST                初始化时使用自定义 C99 配置",
     "  --workspace-lang c|cpp           首次初始化课程工作区的固定语言",
+    "  accoding workspace migrate OLD --root NEW --workspace-lang c|cpp",
     "  --lang LANGUAGE                  指定 OJ 提交语言",
     "",
     "双击启动可进入 TUI。编辑器只需要 test 和 submit 两个命令。",
@@ -315,6 +317,15 @@ async function run(): Promise<void> {
     }
     if (command === "file" && args[1]) {
       await fileMenu(app, await app.resolve(args[1]));
+      return;
+    }
+    if (command === "workspace" && args[1] === "migrate" && args[2]) {
+      if (!root || (language !== "c" && language !== "cpp"))
+        throw new Error("迁移需要 --root NEW 和 --workspace-lang c|cpp。");
+      const report = await migrateLegacyWorkspace(args[2], root, language);
+      console.log("成功迁移题目：" + report.migrated);
+      for (const item of report.skipped) console.warn("未迁移：" + item);
+      if (report.skipped.length) process.exitCode = 1;
       return;
     }
     if (command === "sync") { await app.sync(root); return; }

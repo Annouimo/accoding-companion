@@ -35,7 +35,8 @@
     "katex": "0.16.22",
     "turndown": "7.2.4",
     "ink": "7.1.1",
-    "react": "19.2.6"
+    "react": "19.2.6",
+    "react-devtools-core": "6.1.2"
   },
   "devDependencies": {
     "@types/node": "22.20.4",
