@@ -1,0 +1,97 @@
+name: Publish npm preview (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "DRY_RUN builds only; PUBLISH_NEXT publishes to npm next"
+        type: choice
+        required: true
+        default: DRY_RUN
+        options:
+          - DRY_RUN
+          - PUBLISH_NEXT
+      expected_version:
+        description: "Must exactly match the checked-out prerelease package.json"
+        type: string
+        required: true
+        default: "0.2.0-next.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-next-publish
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    name: Build and validate Accoding Companion CLI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Verify the intended source branch and prerelease version
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/feat/companion-foundation"
+          node - <<'NODE'
+          const fs=require("node:fs");
+          const file="package.json";
+          const pkg=JSON.parse(fs.readFileSync(file,"utf8"));
+          if(pkg.name!=="@annouimo/accoding-companion") throw Error("Unexpected package name");
+          if(pkg.repository?.url!=="git+https://github.com/Annouimo/accoding-companion.git") throw Error("GitHub provenance repository mismatch");
+          if(pkg.version!==process.env.EXPECTED_VERSION || !/^\d+\.\d+\.\d+-next\.\d+$/.test(pkg.version)) throw Error("Expected version mismatch or not a next prerelease");
+          delete pkg.private; // Only the runner copy becomes publishable.
+          fs.writeFileSync(file,JSON.stringify(pkg,null,2)+"\n");
+          NODE
+      - name: Build, test, and pack
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm test
+          npm run build
+          mkdir -p "$RUNNER_TEMP/npm-dist"
+          npm pack --pack-destination "$RUNNER_TEMP/npm-dist"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-preview-tarball
+          path: ${{ runner.temp }}/npm-dist/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish Accoding Companion CLI to npm next
+    needs: pack
+    if: ${{ inputs.mode == 'PUBLISH_NEXT' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Ensure OIDC compatible npm CLI
+        run: npm install --global "npm@^11.21.0"
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-preview-tarball
+          path: ./release
+      - name: Publish approved prerelease package with npm OIDC
+        run: |
+          set -euo pipefail
+          tarball="$(find release -type f -name '*.tgz' -print -quit)"
+          test -n "$tarball"
+          npm publish "$tarball" --tag next --access public
