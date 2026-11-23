@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import { Box, Text, render, useApp, useInput, useWindowSize } from "ink";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { StandaloneWorkflow, ResolvedProblem, SampleTestReport } from "./workflow";
 import { activityAccepted, type ApplicationState } from "./state";
-import { chooseUpdateTargets, type UpdateMode } from "./preset-manager";
+import { type UpdateMode } from "./preset-manager";
 import { courseSettings, droppedPath } from "./workspaces";
 import { SampleOutput } from "./sample-output";
+import { Manual } from "./manual";
+import { LoginForm } from "./login-form";
 
 type Page = { group?: string; problem?: string };
 interface Row {
@@ -18,7 +19,7 @@ interface Row {
   verdict?: string;
 }
 type Panel =
-  | { title: string; rows: Row[]; note?: string; cancel?: () => void; toggle?: (id: string) => void }
+  | { title: string; rows: Row[]; note?: string; cancel?: () => void; toggle?: (id: string) => void; confirm?: () => void }
   | { title: string; input: (text: string) => void | Promise<void>; secret?: boolean; cancel?: () => void };
 interface Group { id: string; title: string; problems: ResolvedProblem[] }
 
@@ -58,24 +59,6 @@ function openFolder(source: string): Promise<void> {
   });
 }
 
-function revealManual(file: string): Promise<void> {
-  if (process.platform !== "win32") {
-    const mac = process.platform === "darwin";
-    const command = mac ? "/usr/bin/open" : "gdbus";
-    const args = mac ? ["-R", file] : ["call", "--session", "--dest", "org.freedesktop.FileManager1",
-      "--object-path", "/org/freedesktop/FileManager1", "--method",
-      "org.freedesktop.FileManager1.ShowItems", JSON.stringify([pathToFileURL(file).href]), ""];
-    return new Promise((resolve, reject) => {
-      execFile(command, args, { timeout: 5000 }, error => error ? reject(error) : resolve());
-    });
-  }
-  return new Promise((resolve, reject) => {
-    const child = spawn("explorer.exe", ["/select,", file], { detached: true, stdio: "ignore" });
-    child.once("error", reject);
-    child.once("spawn", () => { child.unref(); resolve(); });
-  });
-}
-
 function Screen({ app }: { app: StandaloneWorkflow }) {
   const { exit } = useApp();
   const { rows: height } = useWindowSize();
@@ -90,6 +73,8 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   const [message, setMessage] = useState("");
   const [testResult, setTestResult] = useState<Record<string, SampleTestReport>>({});
   const [details, setDetails] = useState<SampleTestReport>();
+  const [manual, setManual] = useState<{ version: string; markdown: string }>();
+  const [loginResume, setLoginResume] = useState<{ after?: () => void }>();
   const cursors = useRef(new Map<string, number>());
   const active = useRef(true);
   const locked = useRef(true);
@@ -206,19 +191,9 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   }
 
   function login(after?: () => void) {
-    open({ title: "Accoding 账号", input: (username) => {
-      if (!username.trim()) return;
-      open({ title: "Accoding 密码", secret: true, input: async (password) => {
-        if (!password) return;
-        const result = await run("登录中…", async () => {
-          const remember = app.credentialBackend.persistent &&
-            await pick("在系统凭据存储中保持登录？", ["仅本次登录", "保持登录"]) === "保持登录";
-          await app.signIn(username.trim(), password, remember);
-          return true;
-        });
-        if (result?.result) after?.();
-      } });
-    } });
+    setPanel(undefined);
+    setMessage("");
+    setLoginResume({ after });
   }
 
   function chooseWorkspace() {
@@ -254,7 +229,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
 
   function importPrompt(kind: "contest" | "problem") {
     if (!app.session.user) { login(() => importPrompt(kind)); return; }
-    open({ title: kind === "contest" ? "比赛 ID 或链接" : "题目 ID 或链接",
+    open({ title: kind === "contest" ? "比赛 ID" : "题目 ID 或链接",
       input: async (value) => {
         if (!value.trim()) return;
         await run("正在导入…", async () => {
@@ -271,50 +246,23 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       } });
   }
 
-  function selectPreset(versions: string[]) {
-    const scopes: { title: string; mode: UpdateMode | "default" }[] = [
-      { title: "设为新题的默认版本", mode: "default" },
-      { title: "仅更新空题", mode: "empty" },
-      { title: "更新未 AC 的题", mode: "unaccepted" },
-      { title: "更新全部题", mode: "all" },
-      { title: problem ? "仅更新当前题" : "自选题目", mode: "selected" },
-    ];
-    return new Promise<{ version: string; mode: UpdateMode | "default" } | undefined>((resolve) => {
-      let version = 0, scope = 0;
-      function draw() {
-        open({ title: "脚手架版本", cancel: () => resolve(undefined), rows: [
-          { id: "version", label: "版本  " + versions[version],
-            run: () => { version = (version + 1) % versions.length; draw(); } },
-          { id: "scope", label: "范围  " + scopes[scope].title,
-            run: () => { scope = (scope + 1) % scopes.length; draw(); } },
-          { id: "next", label: "继续", run: () => {
-            setPanel(undefined); resolve({ version: versions[version], mode: scopes[scope].mode });
-          } }
-        ], note: "Enter 切换选中的版本或范围" });
-      }
-      draw();
-    });
-  }
-
   function selectPresetProblems(): Promise<string[] | undefined> {
     const checked = new Set<string>();
     return new Promise((resolve) => {
       function toggle(id: string) {
-        if (id === "next") return;
         if (!checked.delete(id)) checked.add(id);
         draw();
       }
       function draw() {
         open({ title: "选择要更新的题目", cancel: () => resolve(undefined), toggle,
-          note: "空格勾选，完成后回到第一行确认", rows: [
-            { id: "next", label: "继续（已选 " + checked.size + " 题）",
-              run: () => { setPanel(undefined); resolve([...checked]); } },
+          note: "已选 " + checked.size + " 题 · 空格勾选 · Enter 确认",
+          confirm: () => { setPanel(undefined); resolve([...checked]); }, rows: [
             ...groups.flatMap((entry) => entry.problems).filter((entry) =>
               entry.source.toLowerCase().endsWith(".c")).map((entry) => {
               const id = entry.binding.bindingId;
               return { id, label: (checked.has(id) ? "✓ " : "○ ") +
                 entry.binding.problem.label + " · " + entry.binding.problem.title,
-                run: () => toggle(id) };
+                run: () => {} };
             })
           ] });
       }
@@ -327,26 +275,27 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     await run("正在读取本机脚手架…", async () => {
       if ((await courseSettings(root)).language !== "c") throw Error("此课程使用 C++17。");
       const versions = await app.installedPresetVersions();
-      if (!versions.length) throw Error("尚未安装 C Exam Kit。请先运行安装器。");
-      const selection = await selectPreset(versions.map((entry) => entry.version));
-      if (!selection) return;
-      const { version, mode } = selection;
-      if (mode === "default") {
-        await app.setWorkspacePreset(version, root);
-        console.log("已设为新题默认版本：" + version);
-        return;
-      }
+      if (!versions.length) throw Error("尚未安装 C Exam Kit。请先运行启动器。");
+      const version = versions.length === 1 ? versions[0].version :
+        await pick("选择资源版本", versions.map(entry => entry.version));
+      if (!version) return;
+      const safe = "更新新题默认版本和未改动的旧题";
+      const choose = problem ? "仅更新当前题" : "自选题目";
+      const scope = await pick("选择资源更新范围", problem ? [choose, safe] : [safe, choose]);
+      if (!scope) return;
+      const mode: UpdateMode = scope === safe ? "empty" : "selected";
       const selected = mode === "selected" ? (problem
         ? [problem.binding.bindingId] : await selectPresetProblems()) : [];
       if (!selected) return;
-      const chosen = await chooseUpdateTargets(root, problems.map((p) => p.binding), mode,
-        (binding) => state ? app.state.getActivity(state, root, binding.bindingId, account) : {},
-        selected);
-      if (!chosen.targets.length) { console.log("没有符合范围的题目。"); return; }
-      const confirm = "更新 " + chosen.targets.length + " 道题";
-      const excluded = chosen.excludedUnknown ? " · 状态未知 " + chosen.excludedUnknown + " 道" : "";
-      if (await pick("应用 " + version + excluded, ["取消", confirm]) !== confirm) return;
-      const result = await app.updateQuestionPresets(version, mode, selected, root);
+      const preview = await app.previewPresetUpdate(version, mode, selected, root);
+      if (mode === "selected" && !preview.targets.length) {
+        console.log("没有需要更新的题目。");
+        return;
+      }
+      const summary = (mode === "empty" ? "新题使用 " + version + " · " : "") +
+        "更新 " + preview.targets.length + " 题 · 保留 " + preview.retained + " 题";
+      if (await pick(summary, ["取消", "确认更新"]) !== "确认更新") return;
+      const result = await app.updateQuestionPresets(version, mode, selected, root, mode === "empty");
       setTestResult({});
       console.log("更新 " + result.updated + " 道题");
       for (const error of result.errors) console.log(error);
@@ -356,7 +305,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   function settings() {
     open({ title: "课程设置", rows: [
       { id: "workspace", label: "切换或新建课程", run: chooseWorkspace },
-      ...(root ? [{ id: "preset", label: "脚手架版本", run: presets }] : []),
+      ...(root ? [{ id: "preset", label: "更新课程资源", run: presets }] : []),
       { id: "login", label: app.session.user ? "切换账号" : "登录 Accoding", run: login },
       ...(app.session.user ? [{ id: "logout", label: "退出登录", run: async () => {
         await run("正在退出登录…", () => app.logout());
@@ -401,7 +350,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
         ]
       }) },
       ...(problem.source.toLowerCase().endsWith(".c") ? [
-        { id: "preset", label: "更换脚手架版本", run: presets },
+        { id: "preset", label: "更新本题资源", run: presets },
         { id: "undo", label: "撤销本题上次脚手架更新", run: async () => {
           await run("正在撤销…", () => app.undoQuestionPreset(problem.binding.bindingId, root));
         } }
@@ -421,10 +370,8 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     void run("正在打开手册…", async () => {
       if (!root) throw new Error("请先配置 C99 课程工作区。");
       const file = await app.presetManualPath(root, problem);
-      try { await revealManual(file); }
-      catch (error) {
-        throw new Error("无法在文件管理器中定位手册。\n本地文件 " + file, { cause: error });
-      }
+      const markdown = await fs.readFile(file, "utf8");
+      setManual({ version: path.basename(path.dirname(file)), markdown });
     });
   }
   const entries: Row[] = problem ? [
@@ -496,11 +443,25 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     if ((key.upArrow || key.downArrow) && list.length)
       (panel ? setPanelCursor : setCursor)(
         (selected + list.length + (key.upArrow ? -1 : 1)) % list.length);
-    else if (key.return) void list[selected]?.run();
+    else if (key.return) {
+      if (panel && "rows" in panel && panel.confirm) panel.confirm();
+      else void list[selected]?.run();
+    }
     else if (char === " " && panel && "rows" in panel && list[selected])
       panel.toggle?.(list[selected].id);
-  }, { isActive: !details });
+  }, { isActive: !details && !manual && !loginResume });
 
+  if (manual) return <Manual {...manual} onBack={() => setManual(undefined)} />;
+  if (loginResume) return <LoginForm canRemember={app.credentialBackend.persistent}
+    cancel={() => setLoginResume(undefined)} submit={async (username, password, remember) => {
+      const loginResult = await run("登录中…", async () => {
+        await app.signIn(username, password, remember);
+        return true;
+      }, false);
+      if (!loginResult?.result) return loginResult?.output || "登录失败，请重试。";
+      setLoginResume(undefined);
+      loginResume.after?.();
+    }} />;
   if (details) return <SampleOutput report={details} onBack={() => setDetails(undefined)} />;
   return (
     <Box flexDirection="column" paddingX={1}>

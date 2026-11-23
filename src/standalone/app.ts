@@ -39,6 +39,7 @@ function usage() {
     "  --root DIR                       指定工作区（初始化/同步/查询）",
     "  --preset MANIFEST                初始化时使用自定义 C99 配置",
     "  --workspace-lang c|cpp           首次初始化课程工作区的固定语言",
+    "  accoding resources update VERSION [--root DIR] [--preview]",
     "  accoding workspace migrate OLD --root NEW --workspace-lang c|cpp",
     "  --lang LANGUAGE                  指定 OJ 提交语言",
     "",
@@ -316,6 +317,19 @@ async function run(): Promise<void> {
     }
     if (command === "file" && args[1]) {
       await fileMenu(app, await app.resolve(args[1]));
+      return;
+    }
+    if (command === "resources" && args[1] === "update" && args[2]) {
+      if (args.includes("--preview")) {
+        const preview = await app.previewPresetUpdate(args[2], "empty", [], root);
+        console.log(JSON.stringify({ root: preview.root, version: args[2],
+          eligible: preview.targets.length, retained: preview.retained }));
+        return;
+      }
+      const result = await app.updateQuestionPresets(args[2], "empty", [], root, true);
+      console.log("新题默认资源 " + args[2] + " · 已更新 " + result.updated + " 题 · 保留 " + result.retained + " 题");
+      for (const error of result.errors) console.error(error);
+      if (result.errors.length) process.exitCode = 1;
       return;
     }
     if (command === "workspace" && args[1] === "migrate" && args[2]) {

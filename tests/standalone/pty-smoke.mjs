@@ -18,13 +18,11 @@ await fs.access(bundle);
 
 async function scenario(name, run, prepare) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-pty-"));
-  await fs.writeFile(path.join(home, "gdbus"),
-    '#!/bin/sh\nprintf "%s" "$@" > "$HOME/opened-manual"\n', { mode: 0o700 });
   const env = { ...process.env, HOME: home,
     XDG_CONFIG_HOME: path.join(home, ".config"),
     XDG_DATA_HOME: path.join(home, ".local", "share"),
     CI: "false", TERM: "xterm-256color", NO_COLOR: "1",
-    PATH: home + path.delimiter + process.env.PATH };
+    PATH: process.env.PATH };
   prepare?.(env);
   const command = (prepare ? "stty rows 16 cols 84; exec " : "") +
     JSON.stringify(process.execPath) + " " + JSON.stringify(bundle);
@@ -72,7 +70,7 @@ await scenario("import opens the login form and can be cancelled", async ctx => 
   await ctx.expect("❯ 导入"); ctx.send("\r");
   await ctx.expect("导入比赛 / 作业"); ctx.send("\x1b[B");
   await ctx.expect("❯ 导入独立题目"); ctx.send("\r");
-  await ctx.expect("Accoding 账号"); ctx.send("\x1b");
+  await ctx.expect("登录 Accoding"); ctx.send("\x1b");
   await ctx.expect("❯ 导入"); await delay(250); ctx.send("q");
 });
 
@@ -83,30 +81,30 @@ await scenario("nested course setup saves a C99 workspace", async ctx => {
   await ctx.expect("输入已有或新课程目录"); ctx.send("\r");
   await ctx.expect("课程目录（可粘贴或拖入路径）");
   const directory = path.join(ctx.home, "test-course");
+  await fs.mkdir(directory);
+  const existingCode = path.join(directory, "已有代码.c");
+  await fs.writeFile(existingCode, "int main(void) { return 0; }\n");
   ctx.send(directory); await ctx.expect(directory); ctx.send("\r");
   await ctx.expect("选择课程的编程语言"); ctx.send("\r");
   await ctx.expect("test-course");
   const settings = JSON.parse(await fs.readFile(path.join(directory, ".accoding", "workspace.json"), "utf8"));
   assert.equal(settings.language, "c");
+  assert.equal(await fs.readFile(existingCode, "utf8"), "int main(void) { return 0; }\n");
   await ctx.expect("H 手册");
   settings.presetVersion = "0.6.6";
   await fs.writeFile(path.join(directory, ".accoding", "workspace.json"), JSON.stringify(settings));
   const snapshot = path.join(directory, ".accoding", "presets", settings.presetVersion);
   await fs.mkdir(snapshot, { recursive: true });
   const manual = path.join(snapshot, "manual.zh-CN.md");
-  await fs.writeFile(manual, "# 离线手册\n");
-  ctx.send("\t");
-  await delay(100);
+  await fs.writeFile(manual, "# 测试手册\n\n## 数组\n\n" +
+    "读取数组。\n\n" + String.fromCharCode(96).repeat(3) + "c\n" +
+    "int count = 2; // 示例\n" + String.fromCharCode(96).repeat(3) + "\n");
   ctx.send("h");
-  const opened = path.join(ctx.home, "opened-manual");
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (await fs.stat(opened).then(stat => stat.size > 0, () => false)) break;
-    await delay(40);
-  }
-  const invocation = await fs.readFile(opened, "utf8");
-  assert.ok(invocation.includes("org.freedesktop.FileManager1.ShowItems"));
-  assert.ok(invocation.includes("file://" + manual));
+  await ctx.expect("C99 函数速查 · 0.6.6");
+  await ctx.expect("❯ 数组"); await delay(150); ctx.send("\r");
+  await ctx.expect("int count = 2; // 示例");
+  await delay(150); ctx.send("\x1b"); await ctx.expect("❯ 数组");
+  await delay(150); ctx.send("\x1b"); await ctx.expect("H 手册");
   ctx.send("q");
 });
 
@@ -164,9 +162,9 @@ await scenario("password form stays open until cancelled", async ctx => {
   await ctx.expect("❯ 设置"); ctx.send("\r");
   await ctx.expect("切换或新建课程"); ctx.send("\x1b[B");
   await ctx.expect("❯ 登录 Accoding"); ctx.send("\r");
-  await ctx.expect("Accoding 账号");
-  ctx.send("fake-student"); await ctx.expect("fake-student"); ctx.send("\r");
-  await ctx.expect("Accoding 密码");
+  await ctx.expect("登录 Accoding");
+  ctx.send("fake-student"); await ctx.expect("fake-student"); ctx.send("\t");
+  await ctx.expect("密码  ▏"); await delay(100); ctx.send("secret123"); await ctx.expect("•••••••••");
   await delay(250);
   assert.ok(ctx.alive(), "CLI exited while waiting for password input");
   ctx.send("\x1b");

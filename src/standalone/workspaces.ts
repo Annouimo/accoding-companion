@@ -135,7 +135,7 @@ export async function courseSettings(root: string, requested?: "c" | "cpp"): Pro
   }
   // Never silently take ownership of a legacy workspace or unrelated data.
   if (await exists(path.join(root, ".better-accoding")))
-    throw new Error("检测到旧版工作区，请先使用旧版或执行经过备份的数据迁移。");
+    throw new Error("检测到旧版工作区，请先迁移：" + root);
   let language = requested;
   if (!language && interactive()) {
     const picked = await select("首次配置课程工作区：选择固定编程语言", [
@@ -210,7 +210,9 @@ async function verifyCourseDirectory(root: string, directory: string): Promise<s
 }
 
 async function createCourseDirectory(root: string, names: string[]): Promise<string> {
-  for (const name of names) {
+  const last = names[names.length - 1];
+  for (let index = 0; index < 1000; index++) {
+    const name = names[index] ?? readableName(last.slice(0, 58)) + "-" + (index - names.length + 2);
     try { await fs.mkdir(path.join(root, name)); return name; }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;

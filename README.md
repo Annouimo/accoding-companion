@@ -2,7 +2,7 @@
 
 独立的、**非官方** Accoding 命令行／终端编程助手。用于导入课程比赛、管理 C99/C++17 源码、本地评测及提交到 OJ。此项目与 Accoding、北航没有官方隶属关系。
 
-> **开发预览版。** 两个包已发布到 npm 的 `next` 预览通道，但仍未完成 Mac/Windows 全面实机验收；暂无 `latest` 稳定版。源码中的 `private: true` 仅用于阻止误发布，手动 GitHub Actions 预览发布会在打包时移除该标记。请勿将预览版视为考试或课程官方工具。
+> 正式发行包见 [GitHub Releases](https://github.com/Annouimo/accoding-companion/releases/latest)。
 
 ## 产品设计
 
@@ -49,9 +49,9 @@ node dist/accoding.mjs status --watch
 
 ## 安装和启动
 
-从 [最新发布页](https://github.com/Annouimo/accoding-companion/releases/latest) 下载并解压启动包。macOS 双击 `launch.command`，Windows 双击 `launch.cmd`。Linux 可以运行 `bash launch.command`。
+从 [最新发布页](https://github.com/Annouimo/accoding-companion/releases/latest) 下载对应平台的启动包并完整解压。Windows 双击 `Accoding Launcher.exe`，macOS 双击 `Accoding Launcher.command`。首次先选「安装」，完成后选「启动」。使用说明 HTML 随包提供，首次启动时打开。Linux 可使用下面的 npm 命令。
 
-函数手册随 C Exam Kit preset 0.6.6 起提供。按 H 会在 Finder、Windows 资源管理器或支持文件定位的 Linux 文件管理器中选中该文件。也可以在编辑器里直接打开 `.accoding/presets/<版本>/manual.zh-CN.md`。
+函数手册随 C Exam Kit preset 0.6.6 起提供。按 H 在 Companion 中打开对应版本的章节目录。也可以在编辑器里直接打开 `.accoding/presets/<版本>/manual.zh-CN.md`。
 
 启动脚本检查 Node.js、主程序和 C Exam Kit。首次安装或有更新时会询问是否继续，完成后直接进入 Companion。已是最新版时会直接打开。断网时可以启动本机已安装的 Companion。
 
@@ -62,9 +62,9 @@ npm install -g @annouimo/accoding-companion @annouimo/c-exam-kit-preset
 accoding
 ```
 
-Companion 通过 `npm root --global` 找到 C Exam Kit。启用某个版本时，组件会复制到课程工作区。全局更新后，旧题仍可使用工作区已有的副本。已有课程可在「设置 → 脚手架版本」中选择默认版本。C++17 不需要这个 C99 数据包。
+启动器使用独立的安装目录。直接用 npm 安装时，Companion 仍可从全局 npm 路径读取 preset。启用某个版本时，组件会复制到课程工作区。C++17 课程不需要 C99 资源包。
 
-脚手架下载后可以在 TUI 中设为课程默认版本，并选择更新 **所有空题目／所有未 AC 题目／所有题目／自选题目**。每题可以单独撤销。切换版本只修改 `main.c` 里的脚手架引用。
+资源升级后使用「设置 → 更新课程资源」，或从启动器确认更新当前课程。批量更新适用于源码仍与初始模板一致的题。也可以自选题目，单题切换前会试编译，并记录可撤销的旧版本。
 
 ## 数据迁移与安全
 
