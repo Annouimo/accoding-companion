@@ -254,7 +254,14 @@ export async function startFullScreenTui(app: StandaloneWorkflow): Promise<void>
       if (!selected) continue;
       let result: { output: string } = {output:"未执行操作。"};
       if (selected === "workspace") {
-        const raw = await ask("课程文件夹（可拖入路径）", root);
+        const known = (await app.state.load()).recentWorkspaces || [];
+        const choice = await choose("课程工作区", [base, "工作区"], [
+          ...known.map((dir, index) => ({id:String(index),label:path.basename(dir),note:dir})),
+          {id:"new",label:"添加已有工作区 / 新建课程文件夹"}
+        ]);
+        const raw = choice === "new" ?
+          await ask("课程文件夹（可拖入路径）", root) :
+          choice !== undefined ? known[Number(choice)] : undefined;
         if (raw) result = await transcript(() => app.courseRoot(raw));
       } else if (selected === "preset") {
         if (!root) {
