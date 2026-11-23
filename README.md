@@ -58,13 +58,6 @@ accoding --version
 
 Companion 通过 `npm root --global` 找到 C Exam Kit。启用某个版本时，组件会复制到课程工作区。全局更新后，旧题仍可使用工作区已有的副本。
 
-从旧安装方式升级时，可以用 npm 单独清理旧安装目录。以下是 macOS 上卸载旧 `0.6.4-next.0` 的示例：
-
-```sh
-npm uninstall --prefix "$HOME/Library/Application Support/Accoding Companion/presets/0.6.4-next.0" \
-  --no-save --ignore-scripts @annouimo/c-exam-kit-preset
-```
-
 进入 Accoding Companion 的「设置 → 课程工作区」创建 C99 课程；全新课程默认选择本机已安装的最新数据包。已有课程可在「设置 → 脚手架版本」中选择默认版本。C++17 不需要这个 C99 数据包。
 
 预备中的 [install.sh](install.sh)（macOS/Linux）和 [install.ps1](install.ps1)（Windows）在用户主动运行时：
