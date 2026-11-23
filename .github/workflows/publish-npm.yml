@@ -1,9 +1,6 @@
 name: Publish npm stable release
 
 on:
-  push:
-    branches:
-      - feat/lean-workspace-navigation
   workflow_dispatch:
     inputs:
       mode:
@@ -29,7 +26,6 @@ concurrency:
 
 jobs:
   pack:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Release npm latest 0.2.0' }}
     name: Build and validate Accoding Companion CLI
     runs-on: ubuntu-latest
     permissions:
@@ -44,7 +40,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Verify the intended source branch and stable version
         env:
-          EXPECTED_VERSION: ${{ inputs.expected_version || '0.2.0' }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/feat/lean-workspace-navigation"
@@ -76,7 +72,6 @@ jobs:
           retention-days: 7
 
   launcher:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Release npm latest 0.2.0' }}
     name: Verify launcher (${{ matrix.os }})
     strategy:
       matrix:
@@ -94,7 +89,7 @@ jobs:
   publish:
     name: Publish Accoding Companion CLI to npm latest
     needs: [pack, launcher]
-    if: ${{ github.event_name == 'push' || inputs.mode == 'PUBLISH_LATEST' }}
+    if: ${{ inputs.mode == 'PUBLISH_LATEST' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -110,16 +105,6 @@ jobs:
         with:
           name: npm-release-tarball
           path: ./release
-      - name: Wait for the stable C Exam Kit package to become installable
-        run: |
-          set -euo pipefail
-          for attempt in {1..30}; do
-            version="$(npm view @annouimo/c-exam-kit-preset@latest version --prefer-online --fetch-retries=0 --fetch-timeout=5000 2>/dev/null || true)"
-            if [ "$version" = "0.6.4" ]; then exit 0; fi
-            sleep 10
-          done
-          echo "C Exam Kit 0.6.4 is not available on npm latest." >&2
-          exit 1
       - name: Publish stable package with npm OIDC
         run: |
           set -euo pipefail
