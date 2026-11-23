@@ -8,7 +8,8 @@ import { StandaloneWorkflow } from "../../src/standalone/workflow";
 import type { Problem } from "../../src/model";
 import { StateStore, activityAccepted } from "../../src/standalone/state";
 import { droppedPath, readableName, initializeFriendlyLayout,
-  isFriendlyWorkspace, readableProblemDirectory } from "../../src/standalone/workspaces";
+  isFriendlyWorkspace, readableProblemDirectory, courseSettings,
+  ensureContestDirectory } from "../../src/standalone/workspaces";
 
 test("Finder dropped paths and Windows-safe user-facing names", () => {
   assert.equal(droppedPath("'~/C projects/示例'", "/tmp", "/Users/test"),
@@ -23,7 +24,7 @@ test("Finder dropped paths and Windows-safe user-facing names", () => {
 test("new friendly workspace works and legacy sources are preserved", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-friendly-"));
   try {
-    assert.equal(await initializeFriendlyLayout(root), true);
+    assert.equal((await courseSettings(root, "c")).language, "c");
     assert.equal(await isFriendlyWorkspace(root), true);
     const store = new WorkspaceStore(root);
     const problem: Problem = {
@@ -35,12 +36,12 @@ test("new friendly workspace works and legacy sources are preserved", async () =
       warnings: [], special: false
     };
     const friendly = await readableProblemDirectory(root, problem);
-    assert.equal(friendly, "题目-数组 求和");
+    assert.equal(friendly, path.join("独立题目", "题目-数组 求和"));
     const entry = await store.import(problem, friendly);
     assert.equal(entry.sourceFile, friendly + "/main.c");
     assert.equal(entry.problemDirectory, friendly);
     assert.equal(await fs.readFile(path.join(root, friendly, "main.c"), "utf8").then(Boolean), true);
-    assert.equal(await fs.stat(path.join(root, friendly, "tests", "tests.json")).then(x => x.isFile()), true);
+    assert.equal(await fs.stat(path.join(root, ".accoding", "cases", entry.bindingId, "tests.json")).then(x => x.isFile()), true);
     assert.equal((await store.list())[0].problemDirectory, friendly);
     const app = new StandaloneWorkflow();
     try {
@@ -64,8 +65,10 @@ test("legacy numeric layout never gets silently migrated", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-legacy-"));
   try {
     await fs.mkdir(path.join(root, "contests", "123"), { recursive: true });
+    await fs.mkdir(path.join(root, ".better-accoding"));
     assert.equal(await initializeFriendlyLayout(root), false);
     assert.equal(await isFriendlyWorkspace(root), false);
+    await assert.rejects(courseSettings(root, "c"), /旧版工作区/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -74,6 +77,7 @@ test("legacy numeric layout never gets silently migrated", async () => {
 test("admin-backed problem IDs remain indexable", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-admin-"));
   try {
+    await courseSettings(root, "c");
     const store = new WorkspaceStore(root);
     const admin: Problem = {
       target: { kind: "problemset", service: "admin", problemId: "12345" },
@@ -109,4 +113,17 @@ test("remote verdict refresh does not change last-active problem", async () => {
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test("multiple contest directories never take over user folders", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-course-"));
+  try {
+    await courseSettings(root, "c");
+    await fs.mkdir(path.join(root, "第五次作业"));
+    const owned = await ensureContestDirectory(root, "77", "第五次作业");
+    assert.equal(owned, "第五次作业-77");
+    assert.equal(await ensureContestDirectory(root, "77", "改了名字"), owned);
+    await assert.rejects(courseSettings(root, "cpp"), /固定使用/);
+    assert.equal(await fs.stat(path.join(root, "第五次作业")).then(x=>x.isDirectory()),true);
+  } finally { await fs.rm(root, {recursive:true,force:true}); }
 });
