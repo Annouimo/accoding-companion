@@ -15,6 +15,7 @@ export interface ApplicationState {
   lastWorkspace?: string;
   recentWorkspaces?: string[];
   lastProblem?: string;
+  lastProblemsByWorkspace?: Record<string, string>;
   lastAccount?: string;
   presetPath?: string;
   compilerC?: string;
@@ -28,6 +29,10 @@ export function configDirectory(): string {
     : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "accoding-companion");
 }
 export const emptyState = (): ApplicationState => ({ schemaVersion: 1, problems: {} });
+
+function workspaceAccountKey(root: string, account: string): string {
+  return JSON.stringify([path.resolve(root), account]);
+}
 
 function activityKey(root: string, bindingId: string, account: string): string {
   return JSON.stringify([path.resolve(root), bindingId, account]);
@@ -107,6 +112,7 @@ export class StateStore {
     state.recentWorkspaces = [state.lastWorkspace,
       ...(state.recentWorkspaces || []).filter(x => x !== state.lastWorkspace)].slice(0,12);
     state.lastProblem = key;
+    (state.lastProblemsByWorkspace ??= {})[workspaceAccountKey(root, account)] = key;
     state.lastAccount = account;
     await this.save(state);
   }
@@ -137,7 +143,9 @@ export class StateStore {
   isLastProblem(
     state: ApplicationState, root: string, bindingId: string, account: string
   ): boolean {
-    return state.lastProblem === activityKey(root, bindingId, account);
+    const key = activityKey(root, bindingId, account);
+    return (state.lastProblemsByWorkspace?.[workspaceAccountKey(root, account)]
+      ?? state.lastProblem) === key;
   }
 }
 
