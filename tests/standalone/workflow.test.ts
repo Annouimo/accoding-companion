@@ -8,6 +8,7 @@ import { StandaloneWorkflow } from "../../src/standalone/workflow";
 import { StateStore, isAccepted, activityAccepted } from "../../src/standalone/state";
 import { builtinPreset } from "../../src/standalone/generated-preset";
 import { renderHeader } from "../../src/standalone/scaffold";
+import { courseSettings } from "../../src/standalone/workspaces";
 
 test("state persists verdict per account and source path", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-state-"));
@@ -36,6 +37,7 @@ test("standalone C and C++ judge share the same persisted official samples", asy
   process.env.XDG_CONFIG_HOME = path.join(root, "configuration");
   const app = new StandaloneWorkflow();
   try {
+    await courseSettings(root, "c");
     const workspace = new WorkspaceStore(root);
     await workspace.import({
       target: { kind: "problemset", problemId: "123" },
@@ -52,7 +54,7 @@ test("standalone C and C++ judge share the same persisted official samples", asy
       special: false
     });
     const folder = path.join(root, "problems", "123");
-    const config = path.join(folder, ".accoding", "scaffold");
+    const config = path.join(root, ".accoding", "scaffold", "problem-123");
     await fs.mkdir(config, { recursive: true });
     const preset = builtinPreset();
     await fs.mkdir(path.join(config, "components"));
@@ -99,9 +101,24 @@ test("standalone C and C++ judge share the same persisted official samples", asy
     assert.equal(candidates.find((x) => x.binding.bindingId ===
       resolved.binding.bindingId)?.source, source);
 
-    const cpp = path.join(folder, "main.cpp");
+    // Another course workspace may use C++17; the C99 course cannot.
+    const cppRoot = path.join(root, "other-course");
+    await fs.mkdir(cppRoot);
+    await courseSettings(cppRoot, "cpp");
+    const cppWorkspace = new WorkspaceStore(cppRoot);
+    const cppBinding = await cppWorkspace.import({
+      target: { kind: "problemset", problemId: "123" },
+      title: "Offline example", label: "#123",
+      statement: {format: "html", content: "",
+        baseUrl:"https://accoding.buaa.edu.cn/problem/123/index"},
+      languages: ["c","cpp"],
+      samples: [{key:"sample-1",input:"",expected:"36\n"}],
+      warnings: [], special: false
+    });
+    const cpp = path.join(cppRoot, cppBinding.sourceFile);
     await fs.writeFile(cpp,
-      '#include <iostream>\nint main() { std::cout << 36 << "\\n"; }\n');
+      '#include <iostream>\nint main() { std::cout << 36 << "\n"; }\n'
+        .replace('<< "\n"', '<< "\\n"'));
     const cppResolved = await app.resolve(cpp);
     assert.equal(await app.test(cppResolved), true);
     const cppSnapshot = await app.prepare(cppResolved);
