@@ -2,7 +2,7 @@
 // Runs the built CLI in a real Linux pseudo-terminal, without an Accoding account.
 // Exercise navigation and inline input without submitting account credentials.
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -16,15 +16,18 @@ if (process.platform !== "linux") {
 const bundle = path.resolve(process.argv[2] || "dist/accoding.mjs");
 await fs.access(bundle);
 
-async function scenario(name, run) {
+async function scenario(name, run, prepare) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-pty-"));
-  const editor = path.join(home, "test-editor");
-  await fs.writeFile(editor, '#!/bin/sh\nprintf "%s" "$1" > "$HOME/opened-manual"\n', { mode: 0o700 });
+  await fs.writeFile(path.join(home, "gdbus"),
+    '#!/bin/sh\nprintf "%s" "$@" > "$HOME/opened-manual"\n', { mode: 0o700 });
   const env = { ...process.env, HOME: home,
     XDG_CONFIG_HOME: path.join(home, ".config"),
     XDG_DATA_HOME: path.join(home, ".local", "share"),
-    CI: "false", TERM: "xterm-256color", NO_COLOR: "1", VISUAL: editor };
-  const command = JSON.stringify(process.execPath) + " " + JSON.stringify(bundle);
+    CI: "false", TERM: "xterm-256color", NO_COLOR: "1",
+    PATH: home + path.delimiter + process.env.PATH };
+  prepare?.(env);
+  const command = (prepare ? "stty rows 16 cols 84; exec " : "") +
+    JSON.stringify(process.execPath) + " " + JSON.stringify(bundle);
   const child = spawn("script", ["-q", "-e", "-c", command, "/dev/null"],
     { env, stdio: ["pipe", "pipe", "pipe"] });
   let output = "";
@@ -64,7 +67,9 @@ async function scenario(name, run) {
 }
 
 await scenario("import opens the login form and can be cancelled", async ctx => {
-  await ctx.expect("❯ 导入"); await delay(250); ctx.send("\r");
+  await ctx.expect("❯ 导入"); await delay(250); ctx.send("\x1b[A");
+  await ctx.expect("❯ 设置"); ctx.send("\x1b[B");
+  await ctx.expect("❯ 导入"); ctx.send("\r");
   await ctx.expect("导入比赛 / 作业"); ctx.send("\x1b[B");
   await ctx.expect("❯ 导入独立题目"); ctx.send("\r");
   await ctx.expect("Accoding 账号"); ctx.send("\x1b");
@@ -83,7 +88,7 @@ await scenario("nested course setup saves a C99 workspace", async ctx => {
   await ctx.expect("test-course");
   const settings = JSON.parse(await fs.readFile(path.join(directory, ".accoding", "workspace.json"), "utf8"));
   assert.equal(settings.language, "c");
-  await ctx.expect("H 打开手册");
+  await ctx.expect("H 手册");
   settings.presetVersion = "0.6.6";
   await fs.writeFile(path.join(directory, ".accoding", "workspace.json"), JSON.stringify(settings));
   const snapshot = path.join(directory, ".accoding", "presets", settings.presetVersion);
@@ -99,8 +104,59 @@ await scenario("nested course setup saves a C99 workspace", async ctx => {
     if (await fs.stat(opened).then(stat => stat.size > 0, () => false)) break;
     await delay(40);
   }
-  assert.equal(await fs.readFile(opened, "utf8"), manual);
+  const invocation = await fs.readFile(opened, "utf8");
+  assert.ok(invocation.includes("org.freedesktop.FileManager1.ShowItems"));
+  assert.ok(invocation.includes("file://" + manual));
   ctx.send("q");
+});
+
+await scenario("sample table starts at the difference and scrolls within a 16-row terminal", async ctx => {
+  await ctx.expect("❯ 运行样例");
+  ctx.send("\r");
+  await ctx.expect("输出不符");
+  await ctx.expect("样例输出");
+  await ctx.expect("〈输出已结束〉");
+  await ctx.expect("显示 11–21 / 30");
+  ctx.send("\x1b[C");
+  await ctx.expect("RIGHT-END");
+  ctx.send("\x1b[B");
+  await ctx.expect("显示 12–22 / 30");
+  ctx.send("]");
+  await ctx.expect("通过 · 2/2");
+  ctx.send("\x1b");
+  await ctx.expect("本地样例 1/2 通过");
+  ctx.send("q");
+}, env => {
+  execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
+    import fs from "node:fs/promises";
+    import path from "node:path";
+    import { WorkspaceStore } from "./src/workspace/store.ts";
+    import { StateStore } from "./src/standalone/state.ts";
+    import { courseSettings } from "./src/standalone/workspaces.ts";
+    const root = path.join(process.env.HOME, "sample-course");
+    await courseSettings(root, "c");
+    const lines = Array.from({length: 30}, (_, i) => String(i + 1));
+    lines[10] = "L".repeat(43) + "RIGHT-END";
+    const output = lines.slice(0, 12).join("\\n") + "\\n";
+    const workspace = new WorkspaceStore(root);
+    await workspace.import({
+      target: { kind: "problemset", problemId: "123" }, title: "样例表格", label: "A",
+      statement: { format: "markdown", content: "", baseUrl: "https://accoding.buaa.edu.cn/" },
+      languages: ["c"], warnings: [], special: false,
+      samples: [
+        { key: "first", input: "", expected: lines.join("\\n") + "\\n" },
+        { key: "second", input: "", expected: output }
+      ]
+    });
+    const binding = await workspace.read("problem-123");
+    await fs.writeFile(path.join(root, binding.sourceFile),
+      "#include <stdio.h>\\nint main(void) { fputs(" + JSON.stringify(output) + ", stdout); }\\n");
+    const state = new StateStore();
+    await state.rememberWorkspace(root);
+    const saved = await state.load();
+    saved.tuiPage = { root, group: "independent", problem: "problem-123" };
+    await state.save(saved);
+  `], { env, stdio: "inherit" });
 });
 
 await scenario("password form stays open until cancelled", async ctx => {

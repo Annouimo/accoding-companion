@@ -3,20 +3,17 @@ import path from "node:path";
 import os from "node:os";
 import { hash, type TestCase, type Comparison } from "../model";
 import { runProcess, type ProcessResult } from "./process";
+export function normalizeOutput(text: string, mode: Comparison) {
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (mode === "trim-line-end")
+    return normalized.split("\n").map(line => line.replace(/[ \t]+$/, ""))
+      .join("\n").replace(/\n+$/, "");
+  if (mode === "tokens") return normalized.match(/\S+/g)?.join("\n") ?? "";
+  return normalized;
+}
 export function compare(actual: string, expected: string, mode: Comparison) {
-  const normalize = (s: string) => {
-    s = s.replace(/\r\n/g, "\n");
-    if (mode === "trim-line-end")
-      return s
-        .split("\n")
-        .map((l) => l.replace(/[ \t]+$/, ""))
-        .join("\n")
-        .replace(/\n+$/, "");
-    if (mode === "tokens") return s.match(/\S+/g)?.join("\n") ?? "";
-    return s;
-  };
-  const a = normalize(actual),
-    b = normalize(expected);
+  const a = normalizeOutput(actual, mode),
+    b = normalizeOutput(expected, mode);
   let index = 0;
   while (index < a.length && index < b.length && a[index] === b[index]) index++;
   return {

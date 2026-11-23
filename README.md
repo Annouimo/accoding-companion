@@ -10,7 +10,7 @@
 - **题目可见文件精简。** 每道题默认生成 `main.c`（或 `main.cpp`）、`题目.md`，C99 另外生成小型 `exam.h` 入口。
 - **内部数据隐藏。** 工作区根目录 `.accoding/` 保存题目与样例元数据、脚手架快照、不可变提交源码及提交历史。已有的普通文件不会被程序接管。
 - **本地测试与 OJ 使用同一份代码。** C99 在测试前按需展开脚手架，生成内容哈希标识的源码快照；测试通过后确认提交时复用该快照。
-- **全屏 Ink TUI + 独立 CLI。** 默认恢复上次停留的位置，Esc 返回上一层，H 打开当前题目或课程所用版本的 Markdown 函数手册。窗口较小时可以使用经典菜单，编辑器通过 `test`、`submit` 调用 CLI。
+- **全屏 Ink TUI + 独立 CLI。** 默认恢复上次停留的位置，菜单可首尾循环，Esc 返回上一层，H 定位当前题目或课程所用版本的 Markdown 函数手册。样例失败后会跳到首处差异，方向键滚动对照表，`[` 和 `]` 切换样例。窗口较小时可以使用经典菜单，编辑器通过 `test`、`submit` 调用 CLI。
 - **安装器是唯一联网版本检查入口。** TUI 不自动查软件或脚手架更新；只能将本机已经下载的 C Exam Kit 版本按范围应用到题目。
 
 ## 本地开发与预览
@@ -51,7 +51,7 @@ node dist/accoding.mjs status --watch
 
 从 [最新发布页](https://github.com/Annouimo/accoding-companion/releases/latest) 下载并解压启动包。macOS 双击 `launch.command`，Windows 双击 `launch.cmd`。Linux 可以运行 `bash launch.command`。
 
-函数手册随 C Exam Kit preset 0.6.6 起提供。按 H 时，macOS 使用 TextEdit，Windows 使用记事本，Linux 使用 `VISUAL` 指定的图形文本编辑器（只填可执行文件名或路径）。也可以在编辑器里直接打开 `.accoding/presets/<版本>/manual.zh-CN.md`。
+函数手册随 C Exam Kit preset 0.6.6 起提供。按 H 会在 Finder、Windows 资源管理器或支持文件定位的 Linux 文件管理器中选中该文件。也可以在编辑器里直接打开 `.accoding/presets/<版本>/manual.zh-CN.md`。
 
 启动脚本检查 Node.js、主程序和 C Exam Kit。首次安装或有更新时会询问是否继续，完成后直接进入 Companion。已是最新版时会直接打开。断网时可以启动本机已安装的 Companion。
 

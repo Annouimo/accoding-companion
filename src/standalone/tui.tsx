@@ -2,17 +2,20 @@ import React, { useEffect, useRef, useState } from "react";
 import { Box, Text, render, useApp, useInput, useWindowSize } from "ink";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { execFile, spawn } from "node:child_process";
-import type { StandaloneWorkflow, ResolvedProblem } from "./workflow";
+import type { StandaloneWorkflow, ResolvedProblem, SampleTestReport } from "./workflow";
 import { activityAccepted, type ApplicationState } from "./state";
 import { chooseUpdateTargets, type UpdateMode } from "./preset-manager";
 import { courseSettings, droppedPath } from "./workspaces";
+import { SampleOutput } from "./sample-output";
 
 type Page = { group?: string; problem?: string };
 interface Row {
   id: string;
   label: string;
   run: () => void | Promise<void>;
+  verdict?: string;
 }
 type Panel =
   | { title: string; rows: Row[]; note?: string; cancel?: () => void; toggle?: (id: string) => void }
@@ -55,17 +58,19 @@ function openFolder(source: string): Promise<void> {
   });
 }
 
-function openManual(file: string): Promise<void> {
-  if (process.platform === "darwin") {
+function revealManual(file: string): Promise<void> {
+  if (process.platform !== "win32") {
+    const mac = process.platform === "darwin";
+    const command = mac ? "/usr/bin/open" : "gdbus";
+    const args = mac ? ["-R", file] : ["call", "--session", "--dest", "org.freedesktop.FileManager1",
+      "--object-path", "/org/freedesktop/FileManager1", "--method",
+      "org.freedesktop.FileManager1.ShowItems", JSON.stringify([pathToFileURL(file).href]), ""];
     return new Promise((resolve, reject) => {
-      execFile("/usr/bin/open", ["-a", "TextEdit", file], { timeout: 5000 },
-        error => error ? reject(error) : resolve());
+      execFile(command, args, { timeout: 5000 }, error => error ? reject(error) : resolve());
     });
   }
-  const command = process.platform === "win32" ? "notepad.exe" : process.env.VISUAL?.trim();
-  if (!command) throw new Error("请设置 VISUAL 为图形文本编辑器的可执行文件。");
   return new Promise((resolve, reject) => {
-    const child = spawn(command, [file], { detached: true, stdio: "ignore" });
+    const child = spawn("explorer.exe", ["/select,", file], { detached: true, stdio: "ignore" });
     child.once("error", reject);
     child.once("spawn", () => { child.unref(); resolve(); });
   });
@@ -83,8 +88,8 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   const [pendingOnly, setPendingOnly] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState("正在打开工作区…");
   const [message, setMessage] = useState("");
-  const [testResult, setTestResult] = useState<Record<string, string>>({});
-  const [showDetails, setShowDetails] = useState(false);
+  const [testResult, setTestResult] = useState<Record<string, SampleTestReport>>({});
+  const [details, setDetails] = useState<SampleTestReport>();
   const cursors = useRef(new Map<string, number>());
   const active = useRef(true);
   const locked = useRef(true);
@@ -139,7 +144,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     setPage(next);
     setPanel(undefined);
     setMessage("");
-    setShowDetails(false);
+    setDetails(undefined);
   }
 
   function parent() {
@@ -361,10 +366,18 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
 
   async function test() {
     if (!problem) return;
-    const result = await run("正在运行样例…", () => app.test(problem), false);
-    if (result) setTestResult((all) => ({ ...all, [problem.source]: result.output }));
-    setShowDetails(result?.result !== true);
-    if (result?.result === true) setCursor(0);
+    let report: SampleTestReport | undefined;
+    const result = await run("正在运行样例…", () => app.test(problem, value => { report = value; }), false);
+    if (!result) return;
+    if (report) {
+      const completed = report;
+      setTestResult(all => ({ ...all, [problem.source]: completed }));
+      if (result.result === true) setCursor(0);
+      else setDetails(completed);
+    } else {
+      setTestResult(({ [problem.source]: _, ...all }) => all);
+      setMessage(result.output.trim());
+    }
   }
 
   async function submit(tested: boolean) {
@@ -408,10 +421,9 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     void run("正在打开手册…", async () => {
       if (!root) throw new Error("请先配置 C99 课程工作区。");
       const file = await app.presetManualPath(root, problem);
-      try { await openManual(file); }
+      try { await revealManual(file); }
       catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        throw new Error("无法打开手册。" + reason + "\n本地文件 " + file);
+        throw new Error("无法在文件管理器中定位手册。\n本地文件 " + file, { cause: error });
       }
     });
   }
@@ -422,14 +434,13 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       try { await openFolder(problem.source); }
       catch (error) { setMessage(String(error)); }
     } },
-    ...(result ? [{ id: "details", label: showDetails ? "收起测试详情" : "查看测试详情",
-      run: () => setShowDetails(!showDetails) }] : []),
+    ...(result ? [{ id: "details", label: "查看测试详情", run: () => setDetails(result) }] : []),
     { id: "more", label: "本题其他操作", run: more }
   ] : group ? [
     ...group.problems.filter((entry) => !onlyPending || !accepted(entry)).map((entry) => ({
       id: entry.binding.bindingId,
-      label: entry.binding.problem.label + " · " + entry.binding.problem.title +
-        "   " + (accepted(entry) ? "AC" : verdict(entry) || "未提交"),
+      label: entry.binding.problem.label + " · " + entry.binding.problem.title,
+      verdict: accepted(entry) ? "AC" : verdict(entry) || "未提交",
       run: () => go({ group: group.id, problem: entry.binding.bindingId })
     })),
     ...(group.problems.some(accepted) ? [{ id: "filter", label: onlyPending ? "显示全部题目" : "仅看未 AC",
@@ -482,14 +493,15 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       showManual();
       return;
     }
-    if (key.upArrow || key.downArrow)
-      (panel ? setPanelCursor : setCursor)(Math.min(Math.max(0, list.length - 1),
-        Math.max(0, selected + (key.upArrow ? -1 : 1))));
+    if ((key.upArrow || key.downArrow) && list.length)
+      (panel ? setPanelCursor : setCursor)(
+        (selected + list.length + (key.upArrow ? -1 : 1)) % list.length);
     else if (key.return) void list[selected]?.run();
     else if (char === " " && panel && "rows" in panel && list[selected])
       panel.toggle?.(list[selected].id);
-  });
+  }, { isActive: !details });
 
+  if (details) return <SampleOutput report={details} onBack={() => setDetails(undefined)} />;
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box>
@@ -498,11 +510,12 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
         </Text>)}
       </Box>
       {!panel && problem ? <Text dimColor>
-        {path.basename(problem.source)} · OJ {verdict(problem) ?? "未提交"}
+        {path.basename(problem.source)} · OJ <Text color={accepted(problem) ? "green" : undefined}>
+          {verdict(problem) ?? "未提交"}</Text>
       </Text> : null}
-      {!panel && result ? <Text color={passed ? "green" : undefined}>
-        {showDetails ? result.split("\n").slice(0, 5).join("\n") :
-          passed ? "本地样例 " + result.split("\n").filter((line) => line.endsWith(" : PASS")).length + " 个通过" : "本地样例未通过"}
+      {!panel && result ? <Text color={passed ? "green" : "red"}>
+        {result.kind === "compile" ? "编译失败" :
+          "本地样例 " + result.passed + "/" + result.total + " 通过"}
       </Text> : null}
       {message ? <Text>{message}</Text> : null}
       {busy && !panel ? <Text color="cyan">{busy}</Text> : null}
@@ -512,11 +525,12 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       {list.slice(start, start + visibleCount).map((row, index) =>
         <Text key={row.id} color={selected === start + index ? "cyan" : undefined}>
           {selected === start + index ? "❯ " : "  "}{row.label}
+          {row.verdict ? <Text color={row.verdict === "AC" ? "green" : undefined}>   {row.verdict}</Text> : null}
         </Text>)}
       {!busy && list.length > visibleCount ? <Text dimColor>{selected + 1}/{list.length}</Text> : null}
       <Text dimColor>{panel && "input" in panel ? "Enter 确定 · Esc 取消" :
         panel ? "↑ ↓ 选择 · Enter 确定 · Esc 返回" :
-        "↑ ↓ 选择 · Enter 打开 · " + (group ? "Esc 返回 · " : "") + "H 打开手册 · Q 退出"}</Text>
+        "↑ ↓ 选择 · Enter 打开 · " + (group ? "Esc 返回 · " : "") + "H 手册 · Q 退出"}</Text>
     </Box>
   );
 }
