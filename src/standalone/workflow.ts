@@ -15,7 +15,6 @@ import { monitorSubmissions } from "../submissions/monitor";
 import { bindingId, hash, parseImport, type Binding, type Problem, type Target } from "../model";
 import { assembleC, renderHeader, loadPreset, type LoadedPreset } from "./scaffold";
 import { readableStatement } from "../problems/statement";
-import { builtinPreset } from "./generated-preset";
 import { StateStore, isAccepted, activityAccepted } from "./state";
 import { installedPresets, presetForVersion, setCoursePresetVersion,
   chooseUpdateTargets, applyPresetVersion, undoPresetUpdate,
@@ -168,10 +167,11 @@ export class StandaloneWorkflow {
     return root;
   }
 
-  private async ensureScaffold(root: string, binding: Binding, preset: LoadedPreset): Promise<void> {
+  private async ensureScaffold(root: string, binding: Binding, preset?: LoadedPreset): Promise<void> {
     // C++ workspaces never receive the C99 exam library.
     const config = await courseSettings(root);
     if (config.language !== "c") return;
+    if (!preset) throw new Error("C99 课程缺少 C Exam Kit，请先安装数据包并选择课程脚手架版本。");
     const folder = path.dirname(sourceFor(binding, root));
     const location = path.join(root, ".accoding", "scaffold", binding.bindingId);
     const existing = path.join(location, "manifest.json");
@@ -243,7 +243,12 @@ export class StandaloneWorkflow {
       " 编译器：" + (executable.trim() || "自动检测"));
   }
 
-  async activePreset(explicit?: string, root?: string): Promise<LoadedPreset> {
+  async activePreset(explicit?: string, root?: string): Promise<LoadedPreset | undefined> {
+    // A C++17 course must not require a C99-only data package.
+    if (root) {
+      const config = await courseSettings(root);
+      if (config.language === "cpp") return undefined;
+    }
     if (explicit) return loadPreset(explicit);
     if (root) {
       const config = await courseSettings(root);
@@ -253,7 +258,9 @@ export class StandaloneWorkflow {
       }
     }
     const global = (await this.state.load()).presetPath;
-    return global ? loadPreset(global) : builtinPreset();
+    if (global) return loadPreset(global);
+    // No silent fallback to the old GCD/LCM demonstration header.
+    throw new Error("此 C99 课程尚未配置正式 C Exam Kit。请先安装 @annouimo/c-exam-kit-preset@next，再在“设置 → 脚手架版本”中设为课程默认版本。");
   }
 
   async setPreset(file?: string): Promise<void> {
@@ -319,9 +326,10 @@ export class StandaloneWorkflow {
     const snapshot = await fetchContestSnapshotForImport(this.session.client, input.id,
       (line) => console.log(line));
     const root = await this.courseRoot(rootArg, language);
+    // Check availability before creating contest files.
+    const preset = await this.activePreset(presetPath, root);
     const folder = await ensureContestDirectory(root, snapshot.id, snapshot.title);
     const workspace = new WorkspaceStore(root);
-    const preset = await this.activePreset(presetPath, root);
     const imported = await syncContest(workspace, snapshot, undefined, undefined,
       (problem) => readableProblemDirectory(root, problem, folder));
     for (const binding of imported) {
@@ -394,10 +402,12 @@ export class StandaloneWorkflow {
       problem = await new ProblemsetAdapter(this.session.client.adminReader()).fetch(input.id);
     }
     const root = await this.courseRoot(rootArg, language);
+    // An unavailable C99 data package should not leave a partially imported problem.
+    const preset = await this.activePreset(presetPath, root);
     const workspace = new WorkspaceStore(root);
     const binding = await workspace.import(problem,
       await readableProblemDirectory(root, problem));
-    await this.ensureScaffold(root, binding, await this.activePreset(presetPath, root));
+    await this.ensureScaffold(root, binding, preset);
     await this.ensureStatement(root, binding);
     await this.state.rememberProblem(root, binding.bindingId, account);
     console.log("已导入：" + binding.problem.title);
