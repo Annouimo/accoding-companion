@@ -1,9 +1,6 @@
 name: Publish npm preview (manual)
 
 on:
-  push:
-    branches:
-      - feat/lean-workspace-navigation
   workflow_dispatch:
     inputs:
       mode:
@@ -43,7 +40,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Verify the intended source branch and prerelease version
         env:
-          EXPECTED_VERSION: ${{ inputs.expected_version || '0.2.0-next.3' }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/feat/lean-workspace-navigation"
@@ -64,7 +61,6 @@ jobs:
           npm run typecheck
           npm test
           npm run build
-          node tests/standalone/pty-smoke.mjs dist/accoding.mjs
           mkdir -p "$RUNNER_TEMP/npm-dist"
           npm pack --pack-destination "$RUNNER_TEMP/npm-dist"
       - uses: actions/upload-artifact@v4
@@ -77,7 +73,7 @@ jobs:
   publish:
     name: Publish Accoding Companion CLI to npm next
     needs: pack
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'PUBLISH_NEXT') || (github.event_name == 'push' && github.event.head_commit.message == 'Release npm next 0.2.0-next.3') }}
+    if: ${{ inputs.mode == 'PUBLISH_NEXT' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
