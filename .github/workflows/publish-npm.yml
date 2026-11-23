@@ -1,6 +1,9 @@
 name: Publish npm preview (manual)
 
 on:
+  push:
+    branches:
+      - feat/lean-workspace-navigation
   workflow_dispatch:
     inputs:
       mode:
@@ -15,7 +18,7 @@ on:
         description: "Must exactly match the checked-out prerelease package.json"
         type: string
         required: true
-        default: "0.2.0-next.1"
+        default: "0.2.0-next.2"
 
 permissions:
   contents: read
@@ -40,10 +43,10 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Verify the intended source branch and prerelease version
         env:
-          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_VERSION: ${{ inputs.expected_version || '0.2.0-next.2' }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/feat/companion-foundation"
+          test "$GITHUB_REF" = "refs/heads/feat/lean-workspace-navigation"
           node - <<'NODE'
           const fs=require("node:fs");
           const file="package.json";
@@ -73,7 +76,7 @@ jobs:
   publish:
     name: Publish Accoding Companion CLI to npm next
     needs: pack
-    if: ${{ inputs.mode == 'PUBLISH_NEXT' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'PUBLISH_NEXT') || (github.event_name == 'push' && github.event.head_commit.message == 'Release npm next 0.2.0-next.2') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
