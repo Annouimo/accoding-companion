@@ -1,20 +1,17 @@
 import * as fs from "node:fs/promises";
 import { cTemplate, cppTemplate, defaultSourceFiles } from "./sources";
-import { extractSamples } from "../problems/statement";
+import { extractSamples, readableStatement } from "../problems/statement";
 import {
   readContestRoster,
   writeContestRoster,
-  writeWorkspaceIndex,
 } from "./index";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withWorkspaceLock } from "./lock";
 import {
-  commitCaseFiles,
   recoverCaseTransaction,
   readExternalCaseEdits,
-  caseFile,
 } from "./case-files";
 import {
   bindingId,
@@ -27,7 +24,7 @@ import {
 } from "../model";
 import { problemSchema, bindingSchema } from "./schema";
 export { ConflictError, atomicWrite, safePath } from "./fs";
-import { ConflictError, safePath } from "./fs";
+import { ConflictError, atomicWrite, safePath } from "./fs";
 export function newCase(name = "自定义用例"): TestCase {
   return {
     id: randomUUID(),
@@ -55,12 +52,7 @@ export class WorkspaceStore {
     const task = this.pending.then(async () =>
       withWorkspaceLock(
         await safePath(this.root, ".accoding/write.lock"),
-        async () => {
-          await writeWorkspaceIndex(this.root);
-          const result = await action();
-          await writeWorkspaceIndex(this.root);
-          return result;
-        },
+        action,
       ),
     );
     this.pending = task.catch(() => {});
@@ -115,62 +107,64 @@ export class WorkspaceStore {
     await safePath(this.root, parsed.data.sourceFile);
     const binding = parsed.data;
     await this.ensureSources(binding.problem, binding.problemDirectory);
-    const previous = structuredClone(binding);
+    const externalChanged = await readExternalCaseEdits(this.root, binding);
     const observed = this.observed.get(id);
-    const metadataChanged =
-      observed?.revision === binding.revision &&
-      observed.hash !== hash(rawJSON);
-    const externalChanged = binding.fileHashes
-      ? await readExternalCaseEdits(this.root, binding)
-      : false;
-    const migratedComparison = binding.comparisonDefaultsVersion !== 1;
-    if (migratedComparison) {
-      for (const c of [...binding.cases, ...(binding.deletedCases ?? [])]) {
-        if (c.comparison === "exact") {
-          c.comparison = "trim-line-end";
-          c.revision++;
-        }
+    const metadataChanged = observed?.revision === binding.revision && observed.hash !== hash(rawJSON);
+    if (metadataChanged) binding.revision++;
+    const compact = Boolean(binding.fileHashes || binding.problem.statement.content ||
+      binding.problem.samples.length || binding.comparisonDefaultsVersion !== 1);
+    if (compact) {
+      this.restoreMissingSamples(binding);
+      if (binding.comparisonDefaultsVersion !== 1) {
+        for (const test of [...binding.cases, ...(binding.deletedCases ?? [])])
+          if (test.comparison === "exact") { test.comparison = "trim-line-end"; test.revision++; }
+        binding.comparisonDefaultsVersion = 1;
       }
-      binding.comparisonDefaultsVersion = 1;
       binding.revision++;
     }
-    const repairedSamples = this.restoreMissingSamples(binding);
-    if (repairedSamples) binding.revision++;
-    if (!binding.fileHashes) {
-      // Back up the original format before the first file-model transaction.
-      const backup = await safePath(
-        this.root,
-        `.accoding/backups/${id}-${hash(rawJSON)}.json`,
-      );
+    if (!binding.initialSourceHash) {
+      const mark = await safePath(this.root, ".accoding/initial-hashes/" + id + ".json");
       try {
-        await fs.writeFile(backup, rawJSON, { flag: "wx", mode: 0o600 });
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-          await fs.mkdir(path.dirname(backup), { recursive: true });
-          await fs.writeFile(backup, rawJSON, { flag: "wx", mode: 0o600 });
-        } else if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        const legacy = JSON.parse(await fs.readFile(mark, "utf8")) as { sourceHash?: string };
+        if (legacy.sourceHash && /^[a-f0-9]{64}$/.test(legacy.sourceHash))
+          binding.initialSourceHash = legacy.sourceHash;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      await commitCaseFiles(this.root, binding, previous, rawJSON);
-    } else {
-      if (metadataChanged) binding.revision++;
-      if (
-        externalChanged ||
-        metadataChanged ||
-        repairedSamples ||
-        migratedComparison
-      ) {
-        // External files already contain the new data. Commit their versions without
-        // rewriting them, so queued Webview saves must resolve the revision conflict.
-        if ((await fs.readFile(file, "utf8")) !== rawJSON)
-          throw new ConflictError("读取期间元数据被外部修改，未覆盖文件。");
-        await commitCaseFiles(this.root, binding, previous, rawJSON);
-      }
+    }
+    if (compact || externalChanged || metadataChanged || binding.initialSourceHash !== raw.initialSourceHash) {
+      if ((await fs.readFile(file, "utf8")) !== rawJSON)
+        throw new ConflictError("读取期间元数据被外部修改，未覆盖文件。");
+      await this.persist(file, binding);
     }
     return binding;
   }
+  private async persist(file: string, binding: Binding, initialNotes?: string) {
+    if (initialNotes !== undefined || binding.problem.statement.content) {
+      const notes = await safePath(this.root,
+        path.posix.join(path.posix.dirname(binding.sourceFile), "题目.md"));
+      try { await fs.writeFile(notes, initialNotes ?? readableStatement(binding.problem), { flag: "wx" }); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    }
+    binding.problem = {
+      ...binding.problem,
+      samples: [],
+      statement: { ...binding.problem.statement, content: "" },
+    };
+    delete binding.fileHashes;
+    for (const test of [...binding.cases, ...(binding.deletedCases ?? [])]) {
+      delete test.inputFile;
+      delete test.expectedOutputFile;
+      if (!test.locallyModified && test.baseline?.input === test.input &&
+          test.baseline.expected === test.expected) delete test.baseline;
+    }
+    await atomicWrite(file, JSON.stringify(binding, null, 2) + "\n");
+  }
+
   private restoreMissingSamples(binding: Binding): boolean {
-    if (binding.problem.samples.length) return false;
-    const parsed = extractSamples(
+    const parsed = binding.problem.samples.length ? { samples: binding.problem.samples, warnings: [] } : extractSamples(
       binding.problem.statement.format,
       binding.problem.statement.content,
     );
@@ -214,12 +208,6 @@ export class WorkspaceStore {
       };
     });
   }
-  async caseUriPath(id: string, caseId: string, kind: "input" | "expected") {
-    const binding = await this.read(id);
-    if (!binding.cases.some((c) => c.id === caseId))
-      throw new Error("用例已不存在。");
-    return safePath(this.root, caseFile(binding, caseId, kind));
-  }
   private async ensureSources(problem: Problem, directory?: string) {
     const config = JSON.parse(await fs.readFile(path.join(
       this.root, ".accoding", "workspace.json"), "utf8")) as {
@@ -239,7 +227,7 @@ export class WorkspaceStore {
     }
     return relative;
   }
-  async import(problem: Problem, directory?: string): Promise<Binding> {
+  async import(problem: Problem, directory?: string, notes?: string): Promise<Binding> {
     return this.serialize(async () => {
       problem = problemSchema.parse(problem);
       const id = bindingId(problem.target);
@@ -285,7 +273,8 @@ export class WorkspaceStore {
         })),
         tombstones: [],
       };
-      await commitCaseFiles(this.root, binding);
+      this.restoreMissingSamples(binding);
+      await this.persist(await this.file(id), binding, notes);
       return this.remember(binding);
     });
   }
@@ -310,12 +299,13 @@ export class WorkspaceStore {
         throw new ConflictError(
           "用例已被其他窗口或外部编辑修改。草稿保留，请重新载入并核对。",
         );
-      const previous = structuredClone(binding);
       change(binding);
       binding.revision++;
       bindingSchema.parse(binding);
       await safePath(this.root, binding.sourceFile);
-      await commitCaseFiles(this.root, binding, previous, previousJSON);
+      if (await fs.readFile(await this.file(id), "utf8") !== previousJSON)
+        throw new ConflictError("保存期间元数据被外部修改，未覆盖文件。");
+      await this.persist(await this.file(id), binding);
       return this.remember(binding);
     });
   }
@@ -345,7 +335,8 @@ export class WorkspaceStore {
           b.tombstones = b.tombstones.filter(
             (key) => key !== previous.upstreamSampleKey,
           );
-        const baseline = previous?.baseline;
+        const baseline = previous?.baseline ?? (previous?.source === "sample"
+          ? { input: previous.input, expected: previous.expected } : undefined);
         const changed =
           !previous ||
           ["input", "expected", "hasExpectedOutput", "comparison"].some(

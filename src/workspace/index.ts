@@ -1,19 +1,17 @@
 import fs from "node:fs/promises";
 import { z } from "zod";
 import {
-  bindingId,
   idSchema,
-  targetSchema,
-  type Binding,
   type ContestSnapshot,
 } from "../model";
-import { bindingSchema, problemSchema } from "./schema";
+import { problemSchema } from "./schema";
 import { safePath, atomicWrite } from "./fs";
 const rosterSchema = z.object({
   schemaVersion: z.literal(2),
   generatedBy: z.literal("betterAccoding"),
   id: idSchema,
   title: z.string(),
+  directory: z.string().optional(),
   startTime: z.string().optional(),
   endTime: z.string().optional(),
   fetchedAt: z.string(),
@@ -27,19 +25,6 @@ const rosterSchema = z.object({
   ),
 });
 export type ContestRoster = z.infer<typeof rosterSchema>;
-const workspaceSchema = z.object({
-  schemaVersion: z.literal(2),
-  generatedBy: z.literal("betterAccoding"),
-  bindings: z.array(
-    z.object({
-      bindingId: z.string(),
-      target: targetSchema,
-      sourceFile: z.string(),
-      revision: z.number(),
-      available: z.boolean(),
-    }),
-  ),
-});
 async function optional(file: string) {
   try {
     return JSON.parse(await fs.readFile(file, "utf8"));
@@ -89,12 +74,13 @@ export async function writeContestRoster(
   snapshot: ContestSnapshot,
 ) {
   snapshot = validateContestSnapshot(snapshot);
-  await readContestRoster(root, snapshot.id);
+  const previous = await readContestRoster(root, snapshot.id);
   const roster: ContestRoster = {
     schemaVersion: 2,
     generatedBy: "betterAccoding",
     id: snapshot.id,
     title: snapshot.title,
+    directory: previous?.directory,
     startTime: snapshot.startTime,
     endTime: snapshot.endTime,
     fetchedAt: new Date().toISOString(),
@@ -114,56 +100,4 @@ export async function writeContestRoster(
   const destination = `.accoding/contests/${idSchema.parse(snapshot.id)}.json`;
   await atomicWrite(await safePath(root, destination),
     JSON.stringify(roster, null, 2));
-}
-/** Derived index: binding transactions are authoritative. Caller holds the workspace lock. */
-export async function writeWorkspaceIndex(root: string) {
-  const destination = await safePath(root, ".accoding/index.json");
-  const existing = await optional(destination);
-  if (existing !== undefined && !workspaceSchema.safeParse(existing).success)
-    throw Error("工作区索引版本未知或损坏，原文件已保留。");
-  let files: string[] = [];
-  try {
-    files = await fs.readdir(await safePath(root, ".accoding/bindings"));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-  }
-  const bindings: Binding[] = [];
-  for (const file of files.sort()) {
-    if (!/^((?:admin-)?problem-\d+|contest-\d+-\d+)\.json$/.test(file)) continue;
-    const binding = bindingSchema.parse(
-      await optional(await safePath(root, `.accoding/bindings/${file}`)),
-    );
-    if (
-      binding.bindingId !== file.slice(0, -5) ||
-      binding.bindingId !== bindingId(binding.problem.target)
-    )
-      throw Error("索引来源不匹配。");
-    bindings.push(binding);
-  }
-  const content = JSON.stringify(
-    {
-      schemaVersion: 2,
-      generatedBy: "betterAccoding",
-      bindings: bindings.map((b) => ({
-        bindingId: b.bindingId,
-        target: b.problem.target,
-        sourceFile: b.sourceFile,
-        revision: b.revision,
-        available: !b.unavailable,
-      })),
-      contests: [
-        ...new Set(
-          bindings.flatMap((b) =>
-            b.problem.target.kind === "contest"
-              ? [b.problem.target.contestId]
-              : [],
-          ),
-        ),
-      ].map((id) => ({ id, metadataFile: `.accoding/contests/${id}.json` })),
-    },
-    null,
-    2,
-  );
-  if (JSON.stringify(existing) !== JSON.stringify(JSON.parse(content)))
-    await atomicWrite(destination, content);
 }

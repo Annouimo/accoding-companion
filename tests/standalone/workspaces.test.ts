@@ -41,7 +41,12 @@ test("new friendly workspace works and legacy sources are preserved", async () =
     assert.equal(entry.sourceFile, friendly + "/main.c");
     assert.equal(entry.problemDirectory, friendly);
     assert.equal(await fs.readFile(path.join(root, friendly, "main.c"), "utf8").then(Boolean), true);
-    assert.equal(await fs.stat(path.join(root, ".accoding", "cases", entry.bindingId, "tests.json")).then(x => x.isFile()), true);
+    assert.equal(entry.cases[0].input, "1\n");
+    assert.equal(entry.problem.statement.content, "");
+    assert.equal(entry.problem.samples.length, 0);
+    assert.match(await fs.readFile(path.join(root, friendly, "题目.md"), "utf8"), /Example/);
+    for (const artifact of ["cases", "problems", "index.json", "independent-folder.json"])
+      await assert.rejects(fs.stat(path.join(root, ".accoding", artifact)), { code: "ENOENT" });
     assert.equal((await store.list())[0].problemDirectory, friendly);
     const app = new StandaloneWorkflow();
     try {
@@ -142,4 +147,42 @@ test("switching course roots restores that course's last active question", async
     assert.equal(state.isLastProblem(saved, c, "contest-1-1", "student"), false);
     assert.equal(saved.recentWorkspaces?.length, 2);
   } finally { await fs.rm(root, {recursive:true,force:true}); }
+});
+
+test("legacy case edits are adopted into the compact binding without rewriting notes", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-compact-"));
+  try {
+    await courseSettings(root, "c");
+    const store = new WorkspaceStore(root);
+    const statement = { format: "markdown" as const, content: "Official body", baseUrl: "" };
+    const binding = await store.import({
+      target: { kind: "problemset", problemId: "321" }, title: "Test", label: "A", statement,
+      languages: ["c"], samples: [{ key: "sample-1", input: "1\n", expected: "2\n" }],
+      warnings: [], special: false,
+    });
+    const notes = path.join(root, path.dirname(binding.sourceFile), "题目.md");
+    await fs.writeFile(notes, "My notes\n");
+    const file = path.join(root, ".accoding", "bindings", binding.bindingId + ".json");
+    const test = binding.cases[0];
+    const prefix = ".accoding/cases/" + binding.bindingId + "/" + test.id;
+    const { hash } = await import("../../src/model");
+    binding.problem.statement = statement;
+    binding.problem.samples = [{ key: "sample-1", input: test.input, expected: test.expected }];
+    test.baseline = { input: test.input, expected: test.expected };
+    binding.fileHashes = { [prefix + ".in"]: hash(test.input), [prefix + ".out"]: hash(test.expected) };
+    await fs.mkdir(path.dirname(path.join(root, prefix)), { recursive: true });
+    await fs.writeFile(path.join(root, prefix + ".in"), "8\n");
+    await fs.writeFile(path.join(root, prefix + ".out"), test.expected);
+    await fs.writeFile(file, JSON.stringify(binding));
+    const fresh = await new WorkspaceStore(root).read(binding.bindingId);
+    assert.equal(fresh.cases[0].input, "8\n");
+    assert.equal(fresh.cases[0].baseline?.input, "1\n");
+    assert.equal(fresh.cases[0].locallyModified, true);
+    assert.equal(fresh.fileHashes, undefined);
+    assert.deepEqual(fresh.problem.samples, []);
+    assert.equal(await fs.readFile(notes, "utf8"), "My notes\n");
+    assert.equal(await fs.readFile(path.join(root, prefix + ".in"), "utf8"), "8\n");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

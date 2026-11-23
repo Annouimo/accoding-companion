@@ -73,7 +73,7 @@ export async function loadPreset(manifestPath: string): Promise<LoadedPreset> {
     ids.add(id);
     const symbols = stringArray(item.symbols, id + ".symbols");
     const requires = stringArray(item.requires, id + ".requires");
-    if (!symbols.length || !symbols.every((name) => IDENTIFIER.test(name)))
+    if (!symbols.every((name) => IDENTIFIER.test(name)))
       fail("invalid symbols for " + id);
     for (const name of symbols) {
       if (exported.has(name)) fail("duplicate exported symbol: " + name);
@@ -196,7 +196,9 @@ function lines(text: string): string[] {
 }
 
 /** Assemble only explicitly used exported symbols and their component dependencies. */
-export function assembleC(source: string, preset: LoadedPreset): {
+export function assembleC(
+  source: string, preset: LoadedPreset, header = preset.manifest.headerFile
+): {
   code: string;
   components: string[];
 } {
@@ -205,24 +207,26 @@ export function assembleC(source: string, preset: LoadedPreset): {
   if (sourceLines.length !== withoutComments.length)
     fail("cannot inspect source line boundaries");
   let includeAt = -1;
-  let conditionDepth = 0;
   for (let i = 0; i < sourceLines.length; i++) {
     const line = withoutComments[i].trim();
-    if (/^#\s*(if|ifdef|ifndef)\b/.test(line)) conditionDepth++;
-    if (/^#\s*endif\b/.test(line)) conditionDepth--;
-    if (conditionDepth < 0) fail("unbalanced preprocessor condition");
-    if (!/^#\s*include\b/.test(line)) continue;
+    if (!/^#\s*include\b/.test(line)) {
+      if (line.startsWith("#")) fail("only #include is supported in solution source");
+      continue;
+    }
     const directive = /^#\s*include\s*(?:<([^>\n]+)>|"([^"\n]+)")\s*$/.exec(line);
     if (!directive) fail("unsupported #include directive at line " + (i + 1));
     if (directive[1]) continue; // Standard/system include remains in main.c.
-    if (directive[2] !== preset.manifest.headerFile)
+    if (directive[2] !== header)
       fail("other local headers are unsupported in C99 single-file mode: " + directive[2]);
-    if (conditionDepth !== 0) fail("exam header must be included unconditionally");
     if (includeAt !== -1) fail("exam header must be included exactly once");
     includeAt = i;
   }
-  if (includeAt === -1) fail('missing #include "' + preset.manifest.headerFile + '"');
+  if (includeAt === -1) fail('missing #include "' + header + '"');
   const symbols = new Set(maskC(source, true).match(/[A-Za-z_][A-Za-z_0-9]*/g) ?? []);
+  const userCode = maskC(source, true).replace(/^\s*#.*$/gm, "");
+  const definitionsInUserCode = new Set([...userCode.matchAll(
+    /\b([A-Za-z_]\w*)\s*\([^;{}]*\)\s*\{/g
+  )].map((match) => match[1]));
   const selected = new Set<string>();
   const byId = new Map(preset.manifest.components.map((component) => [component.id, component]));
   function select(id: string): void {
@@ -231,11 +235,14 @@ export function assembleC(source: string, preset: LoadedPreset): {
     for (const dependency of byId.get(id)!.requires) select(dependency);
   }
   for (const component of preset.manifest.components) {
-    if (component.symbols.some((name) => symbols.has(name))) select(component.id);
+    for (const name of component.symbols) {
+      if (definitionsInUserCode.has(name)) fail("solution defines a reserved preset function: " + name);
+      if (symbols.has(name)) select(component.id);
+    }
   }
   const definitions = includeHeaders(preset) + componentCode(preset, selected);
   const result = sourceLines.slice();
-  result[includeAt] = definitions + "\n#line " + (includeAt + 2) + ' "main.c"\n';
+  result[includeAt] = definitions + "\n";
   return { code: result.join(""), components: preset.order.filter((id) => selected.has(id)) };
 }
 

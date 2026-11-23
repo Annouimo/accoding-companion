@@ -68,7 +68,8 @@ test("installed npm C99 data and per-question update preserve original code", as
     await fs.writeFile(expanded,renderHeader(preset));
     const visible=path.join(root,"A-Test","exam.h");
     const relative=path.relative(path.dirname(source),expanded).split(path.sep).join("/");
-    await fs.writeFile(visible,"#include \""+relative+"\"\n");
+    await fs.writeFile(visible, "#ifndef ACCODING_EXAM_WRAPPER_H\n#define ACCODING_EXAM_WRAPPER_H\n" +
+      '#include "' + relative + '"\n#endif\n');
     const pkg=path.join(process.env.XDG_DATA_HOME!,"accoding-companion","presets","0.1.0",
       "node_modules","@annouimo","c-exam-kit-preset");
     await fs.mkdir(pkg,{recursive:true});
@@ -82,11 +83,24 @@ test("installed npm C99 data and per-question update preserve original code", as
     await fs.writeFile(marker,JSON.stringify({sourceHash:hash(sourceCode)}));
     const blank=await chooseUpdateTargets(root,[binding],"empty",()=>({}));
     assert.equal(blank.targets.length,1);
-    await applyPresetVersion(root,binding,installed[0],toolchain());
-    assert.equal(await fs.readFile(source,"utf8"),sourceCode);
-    assert.ok((await fs.readdir(path.join(root,".accoding","scaffold-history",binding.bindingId))).length);
-    await undoPresetUpdate(root,binding);
-    assert.equal(await fs.readFile(source,"utf8"),sourceCode);
+    await applyPresetVersion(root, binding, installed[0], toolchain());
+    const updated = await fs.readFile(source, "utf8");
+    assert.match(updated, /\.accoding\/presets\/0\.1\.0\/expanded\.h/);
+    assert.equal(updated.replace(/#include "[^"]+"/, '#include "exam.h"'), sourceCode);
+    const second = await store.import({ ...problem, target: { kind: "problemset", problemId: "321" } }, "B-Test");
+    await fs.writeFile(path.join(root, second.sourceFile), updated);
+    const app = new StandaloneWorkflow();
+    try {
+      const left = await app.prepare(await app.resolve(source));
+      const right = await app.prepare(await app.resolve(path.join(root, second.sourceFile)));
+      assert.equal(left.code, right.code);
+    } finally { app.dispose(); }
+    assert.equal((await fs.readdir(path.join(root, ".accoding", "presets")))
+      .filter((name) => name === "0.1.0").length, 1);
+    await undoPresetUpdate(root, binding);
+    const undone = await fs.readFile(source, "utf8");
+    assert.match(undone, /\.accoding\/presets\/local-[a-f0-9]{64}\/expanded\.h/);
+    assert.equal(undone.replace(/#include "[^"]+"/, '#include "exam.h"'), sourceCode);
   } finally {
     if(previous===undefined)delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME=previous;

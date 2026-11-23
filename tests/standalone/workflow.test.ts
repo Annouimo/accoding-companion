@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { WorkspaceStore } from "../../src/workspace/store";
-import { StandaloneWorkflow } from "../../src/standalone/workflow";
+import { compile } from "../../src/judge/judge";
+import { StandaloneWorkflow, toolchain } from "../../src/standalone/workflow";
 import { StateStore, isAccepted, activityAccepted } from "../../src/standalone/state";
 import { builtinPreset } from "../../src/standalone/generated-preset";
 import { renderHeader } from "../../src/standalone/scaffold";
@@ -93,22 +94,32 @@ test("standalone C and C++ judge share the same persisted official samples", asy
     await fs.writeFile(path.join(folder, "exam.h"), wrapper + "// changed");
     await assert.rejects(app.prepare(resolved), /exam.h 已被修改/);
     await fs.writeFile(path.join(folder, "exam.h"), wrapper);
-    assert.notEqual(prepared.source, source);
-    const firstBytes = await fs.readFile(prepared.source, "utf8");
+    assert.equal(prepared.source, source);
+    const firstBytes = prepared.code;
+    assert.ok(!firstBytes.includes("#line"));
+    const compiled = await compile(source, firstBytes, toolchain());
+    try {
+      assert.equal(compiled.result.exitCode, 0);
+      assert.equal(await fs.readFile(path.join(compiled.directory, "submit.c"), "utf8"), firstBytes);
+    } finally {
+      await fs.rm(compiled.directory, { recursive: true, force: true });
+    }
+    await assert.rejects(fs.stat(path.join(root, ".accoding", "snapshots")), { code: "ENOENT" });
+    await assert.rejects(fs.stat(path.join(root, ".accoding", "runs")), { code: "ENOENT" });
     const originalBytes = await fs.readFile(source, "utf8");
     assert.equal(prepared.originalHash.length, 64);
     // A second editor task must not overwrite a snapshot used by the first one.
     await fs.writeFile(source, originalBytes.replace("12, 18", "15, 20"));
     const changed = await app.prepare(resolved);
-    assert.notEqual(changed.source, prepared.source);
+    assert.notEqual(changed.code, prepared.code);
     assert.notEqual(changed.originalHash, prepared.originalHash);
-    assert.equal(await fs.readFile(prepared.source, "utf8"), firstBytes);
+    assert.equal(prepared.code, firstBytes);
     await fs.writeFile(source, originalBytes);
     const [repeat, concurrent] = await Promise.all([
       app.prepare(resolved), app.prepare(resolved)
     ]);
-    assert.equal(repeat.source, prepared.source);
-    assert.equal(concurrent.source, prepared.source);
+    assert.equal(repeat.code, prepared.code);
+    assert.equal(concurrent.code, prepared.code);
     // A stale or outside-workspace source preference must not override
     // the validated source association in the binding.
     await app.state.rememberProblem(root, resolved.binding.bindingId, "offline",
@@ -139,7 +150,7 @@ test("standalone C and C++ judge share the same persisted official samples", asy
     assert.equal(await app.test(cppResolved), true);
     const cppSnapshot = await app.prepare(cppResolved);
     assert.ok(!cppSnapshot.code.includes("exam_lcm_u64"));
-    assert.notEqual(cppSnapshot.source, cpp);
+    assert.equal(cppSnapshot.source, cpp);
     assert.equal(await fs.readFile(cppSnapshot.source, "utf8"), cppSnapshot.code);
   } finally {
     app.dispose();

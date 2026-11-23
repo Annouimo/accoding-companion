@@ -10,69 +10,33 @@
 
 账号凭据在 macOS Keychain 或 Windows DPAPI 中，**不随课程工作区拷贝**。Linux 首版只支持进程内会话凭据。
 
-### 新课程的约定目录
+### 新课程工作区
 
-```text
-C语言课程/
-  第六次作业/
-    A-字符统计/
-      main.c
-      exam.h
-      题目.md
-    B-数组操作/
-      main.c
-      exam.h
-      题目.md
-  第七次作业/
-    A-字符串/main.c
-    A-字符串/exam.h
-    A-字符串/题目.md
-  用户自己的笔记/
-  .accoding/
-    workspace.json
-    index.json
-    bindings/
-    contests/
-    problems/
-    cases/
-    scaffold/
-    scaffold-history/
-    initial-hashes/
-    submissions/
-    snapshots/
-    cache/
-    runs/
-    transactions/
-```
+题目目录包含源码和 `题目.md`。C++17 课程使用 `main.cpp`，C99 课程使用 `main.c`。
 
-C++17 工作区只有 `main.cpp` 和 `题目.md`，不生成 C99 的 `exam.h`。
+| `.accoding/` 路径 | 用途 |
+| --- | --- |
+| `workspace.json` | 课程语言、新题默认 preset 版本、独立题目目录 |
+| `bindings/` | 题目来源、源码路径、本地用例、初始源码哈希和 preset 回退记录 |
+| `contests/` | 比赛目录和题目清单 |
+| `presets/<版本>/` | 组件、依赖图及由它们构建的完整头文件 |
+| `submissions/` | 按账号记录的 OJ 提交和未决尝试 |
 
-`.accoding/workspace.json` 保存 `schemaVersion:1`、`kind:"course"`、`language:"c"|"cpp"` 及可选的 `presetVersion`。工作区语言固定。每场比赛通过 `.accoding/contests/<id>.location.json` 记录子目录，不凭名字猜测用户文件夹的所有权。索引 `.accoding/index.json` 是可重建派生文件；题目绑定、用例和提交记录是持久数据，不能当缓存删除。
+题面只保存在 `题目.md`，同步保留既有笔记。样例与自定义用例存放在绑定里。对本地改过的官方样例同时保留官方基线，用于后续同步。打开旧工作区会先恢复未完结的用例事务、导入磁盘上经外部编辑的用例，再原子保存新版绑定。旧文件留在原处供确认，新工作区不产生用例投影、题面镜像或派生索引。
 
 ## C99 源码展开
 
-用户可见的 `exam.h` 是一份小型包装头文件，以相对路径引用工作区 `.accoding/scaffold/<题目ID>/expanded.h`，使普通 GCC/Clang 能直接编译 `main.c`。使用完整函数库定义而不是重复放入每道题目的可见目录。
+课程内的各题直接通过相对路径引用 `.accoding/presets/<版本>/expanded.h`，IDE 和本地编译器可使用完整接口。每个已使用的版本在课程内只保存一份。选择课程默认版本只影响新题，单题版本由源码中的 include 固定。旧 `exam.h` 包装头仍可读取，显式应用新版时会验证旧头文件并切换到共享路径。版本回退只改写受管理的 include。
 
-本地测试时从 `main.c` 与绑定的 `manifest.json` 按需展开实际使用组件及依赖，产生 `.accoding/snapshots/<sha256>.c`，将相同的代码字节送入编译器；测试通过后确认提交时直接复用该源码快照。如果源文件改变，需要重新测试。程序发现可见的 `exam.h` 被修改时拒绝自动展开，避免本地开发与 OJ 上传使用不同内容。
+测试读取用户源码，从被引用的符号出发计算组件依赖闭包。编译器在系统临时目录中编译生成的 `submit.c`，流程结束后清理文件。测试通过的源码字节在同一会话内可直接提交。如果编辑了原源码，需要重新测试。直接提交会先组装并编译待上传的同一份源码。
 
-正式发行前需要检查 C99/GCC、macOS Clang 和旧 Windows MinGW 的相对头文件及 Unicode 路径兼容性。
+## TUI 交互
 
-## 用户可编辑文件
-
-- `main.c`、`main.cpp`：用户源码。程序不因远程同步或脚手架更新覆盖。
-- `题目.md`：第一次导入生成，后续同步只更新隐藏缓存，不覆盖用户编辑。
-- `exam.h`：由程序生成的入口，用户修改后拒绝自动组件替换，必须明确处理冲突。
-- 用户其他目录：不由 Accoding 管理。若拟生成目录与已有目录冲突，另选安全名称而非接管。
+Ink 界面保持挂载，页面状态与面包屑共享课程、作业和题目路径。Esc 返回上一级，Tab 将焦点移到路径，左右键选择祖先页，Enter 跳转。测试与提交状态在题目原页显示。
 
 ## 旧版工作区
 
-旧版以 `.better-accoding/` 为核心，常有数字目录和多余的 C/C++ 源文件。新版**不自动搬迁**。显式运行 `accoding workspace migrate OLD --root NEW --workspace-lang c|cpp` 在独立新根目录复制题目绑定、源码、可用样例及题目说明，保留旧数据。当前版本不声称所有旧账号与提交历史都已迁移：未经迁移验证的内容仍应从旧目录读取或通过 Accoding 同步恢复。
-
-## 脚手架更新
-
-安装器只将 npm 数据包下载到程序用户数据目录，不触及课程题目。用户在 TUI 选择本机版本后可设置课程默认版本（影响未来题目），或批量应用到已有 C99 题目。应用前预览选项范围，先编译检查，再在受控写锁内备份和切换组件目录；用户源码与笔记保持不变。
-
-模式包括：所有未 AC（当前账号状态未知的题目排除）、所有空题目（必须有可信初始化源码哈希）、所有题目、自选题目。C++17 不参与 C99 脚手架更新。
+旧 `.better-accoding/` 根目录可用 `accoding workspace migrate OLD --root NEW --workspace-lang c|cpp` 显式迁移。迁移复制题目、源码和用例，原目录保留。账号和旧提交记录的完整迁移仍需验证。
 
 ## 系统约定
 

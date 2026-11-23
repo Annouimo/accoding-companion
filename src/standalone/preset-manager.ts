@@ -2,10 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { dataDirectory } from "./state";
-import { loadPreset, renderHeader, assembleC } from "./scaffold";
+import { loadPreset, renderHeader, assembleC, type LoadedPreset } from "./scaffold";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { withWorkspaceLock } from "../workspace/lock";
 import { compile, type Toolchain } from "../judge/judge";
+import { WorkspaceStore } from "../workspace/store";
 import { hash, type Binding } from "../model";
 
 const DATA_PACKAGE = "@annouimo/c-exam-kit-preset";
@@ -53,12 +54,16 @@ export async function presetForVersion(version: string): Promise<InstalledPreset
 }
 
 export async function setCoursePresetVersion(root: string, version: string): Promise<void> {
-  await presetForVersion(version);
+  const installed = await presetForVersion(version);
+  await saveSharedPreset(root, await loadPreset(installed.manifestPath), version);
   const file = await safePath(root, ".accoding/workspace.json");
-  const config = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
-  if (config.kind !== "course") throw new Error("不是有效的课程工作区。");
-  config.presetVersion = version;
-  await atomicWrite(file, JSON.stringify(config, null, 2) + "\n");
+  await withWorkspaceLock(path.join(path.dirname(file), "write.lock"), async () => {
+    const config = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
+    if (config.kind !== "course" || config.language !== "c")
+      throw new Error("此课程不使用 C99 脚手架。");
+    config.presetVersion = version;
+    await atomicWrite(file, JSON.stringify(config, null, 2) + "\n");
+  });
 }
 
 export type UpdateMode = "unaccepted" | "empty" | "all" | "selected";
@@ -89,8 +94,8 @@ export async function chooseUpdateTargets(
   let unknown = 0;
   for (const b of eligible) {
     const mark = path.join(root, ".accoding", "initial-hashes", b.bindingId + ".json");
-    let initial: string | undefined;
-    try { initial = (JSON.parse(await fs.readFile(mark, "utf8")) as
+    let initial = b.initialSourceHash;
+    try { initial ??= (JSON.parse(await fs.readFile(mark, "utf8")) as
       { sourceHash?: string }).sourceHash;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -102,97 +107,143 @@ export async function chooseUpdateTargets(
   return { targets: blank, excludedUnknown: unknown };
 }
 
-function relativeHeader(from: string, to: string): string {
-  return path.relative(from, to).split(path.sep).join("/");
+const SNAPSHOT_KEY = /^(?:[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?|local-[a-f0-9]{64})$/;
+
+export function presetFingerprint(preset: LoadedPreset): string {
+  return hash(JSON.stringify([preset.manifest, [...preset.code]]));
 }
 
-async function stagePreset(folder: string, manifestPath: string, version: string) {
-  const preset = await loadPreset(manifestPath);
-  await fs.mkdir(folder, { recursive: true });
-  for (const part of preset.manifest.components) {
-    const file = path.resolve(folder, part.source);
-    if (path.relative(folder, file).startsWith(".."))
-      throw new Error("组件路径越界。");
-    await fs.mkdir(path.dirname(file), {recursive:true});
-    await fs.writeFile(file, preset.code.get(part.id)!, {flag:"wx"});
+export async function sharedPresetPath(root: string, key: string): Promise<string> {
+  if (!SNAPSHOT_KEY.test(key)) throw new Error("无效的工作区脚手架版本。");
+  return safePath(root, ".accoding/presets/" + key);
+}
+
+export async function saveSharedPreset(root: string, preset: LoadedPreset, version?: string) {
+  const fingerprint = presetFingerprint(preset);
+  const key = version ?? "local-" + fingerprint;
+  const destination = await sharedPresetPath(root, key);
+  const base = path.dirname(destination);
+  await withWorkspaceLock(path.join(base, "write.lock"), async () => {
+    try {
+      const existing = await loadPreset(destination);
+      if (presetFingerprint(existing) !== fingerprint)
+        throw new Error("已保存的脚手架版本与安装包内容不一致：" + key);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const stage = path.join(base, ".stage-" + randomUUID());
+    try {
+      for (const component of preset.manifest.components) {
+        const target = await safePath(stage, component.source);
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, preset.code.get(component.id)!, { flag: "wx" });
+      }
+      await fs.writeFile(path.join(stage, "manifest.json"),
+        JSON.stringify(preset.manifest, null, 2) + "\n");
+      await fs.writeFile(path.join(stage, "expanded.h"), renderHeader(preset));
+      await fs.rename(stage, destination);
+    } finally {
+      await fs.rm(stage, { recursive: true, force: true });
+    }
+  });
+  return { key, directory: destination };
+}
+
+export function presetInclude(source: string, directory: string): string {
+  return path.relative(path.dirname(source), path.join(directory, "expanded.h")).split(path.sep).join("/");
+}
+
+export function sharedInclude(root: string, source: string, code: string) {
+  const base = path.join(root, ".accoding", "presets");
+  for (const match of code.matchAll(/^[ \t]*#[ \t]*include[ \t]*"([^"\r\n]+)"/gm)) {
+    const file = path.resolve(path.dirname(source), match[1]);
+    const [key, header, extra] = path.relative(base, file).split(path.sep);
+    if (SNAPSHOT_KEY.test(key) && header === "expanded.h" && !extra)
+      return { key, include: match[1] };
   }
-  await fs.writeFile(path.join(folder, "manifest.json"),
-    JSON.stringify(preset.manifest, null, 2)+"\n", {flag:"wx"});
-  await fs.writeFile(path.join(folder, "expanded.h"), renderHeader(preset), {flag:"wx"});
-  await fs.writeFile(path.join(folder, "version.json"),
-    JSON.stringify({ version, preset: preset.manifest.id }, null, 2)+"\n", {flag:"wx"});
-  return preset;
+}
+
+function replaceInclude(code: string, before: string, after: string): string {
+  return code.replace(/(^[ \t]*#[ \t]*include[ \t]*")([^"\r\n]+)(")/gm,
+    (line, start: string, include: string, end: string) =>
+      include === before ? start + after + end : line);
+}
+
+async function previousPreset(
+  root: string, binding: Binding, source: string, code: string
+): Promise<{ key: string; include: string } | undefined> {
+  const shared = sharedInclude(root, source, code);
+  if (shared) return shared;
+  const directory = await safePath(root, ".accoding/scaffold/" + binding.bindingId);
+  let preset: LoadedPreset;
+  try { preset = await loadPreset(directory); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const include = preset.manifest.headerFile;
+  const wrapper = await fs.readFile(path.join(path.dirname(source), include), "utf8");
+  const expected = "#ifndef ACCODING_EXAM_WRAPPER_H\n#define ACCODING_EXAM_WRAPPER_H\n" +
+    '#include "' + presetInclude(source, directory) + '"\n#endif\n';
+  if (wrapper.replaceAll("\r\n", "\n") !== expected ||
+      await fs.readFile(path.join(directory, "expanded.h"), "utf8") !== renderHeader(preset))
+    throw new Error("旧 exam.h 或完整头文件已被修改，请先核对。");
+  const saved = await saveSharedPreset(root, preset);
+  return { key: saved.key, include };
 }
 
 export async function applyPresetVersion(
   root: string, binding: Binding, installed: InstalledPreset, toolchain: Toolchain
 ): Promise<void> {
-  const key = binding.bindingId;
-  if (!/^(?:admin-)?problem-\d+$|^contest-\d+-\d+$/.test(key))
-    throw new Error("题目 ID 非法");
   const source = await safePath(root, binding.sourceFile);
-  if (path.extname(source).toLowerCase() !== ".c")
-    throw new Error("仅 C99 工作区支持 C Exam Kit。");
-  const base = await safePath(root, ".accoding/scaffold");
-  const active = await safePath(root, ".accoding/scaffold/" + key);
-  const expanded = path.join(active, "expanded.h");
-  const manifest = path.join(active, "manifest.json");
+  if (path.extname(source).toLowerCase() !== ".c") throw new Error("仅 C99 支持 C Exam Kit。");
   const preset = await loadPreset(installed.manifestPath);
-  const visibleHeader = path.join(path.dirname(source), preset.manifest.headerFile);
-  // The visible header must be the wrapper we generated, not user-edited content.
-  const wrapper = await fs.readFile(visibleHeader, "utf8");
-  const expected = relativeHeader(path.dirname(source), expanded);
-  if (!wrapper.includes('#include "' + expected + '"'))
-    throw new Error("exam.h 已被用户修改，不自动覆盖或更新此题。");
-  const code = await fs.readFile(source, "utf8");
-  const expandedCode = code.includes('#include "' + preset.manifest.headerFile + '"')
-    ? assembleC(code, preset).code : code;
-  // Compile-check the replacement before touching active library files.
-  const temp = await safePath(root, ".accoding/cache/preset-" + randomUUID() + ".c");
-  await fs.mkdir(path.dirname(temp), { recursive: true });
-  await fs.writeFile(temp, expandedCode, { flag: "wx" });
-  try {
-    const checked = await compile(temp, path.join(root, ".accoding", "cache", "compiles"),
-      toolchain, undefined, false, path.dirname(source));
+  const target = await saveSharedPreset(root, preset, installed.version);
+  const nextInclude = presetInclude(source, target.directory);
+  await withWorkspaceLock(path.join(root, ".accoding", "presets", "switch.lock"), async () => {
+    const workspace = new WorkspaceStore(root);
+    const current = await workspace.read(binding.bindingId);
+    const code = await fs.readFile(source, "utf8");
+    const previous = await previousPreset(root, current, source, code);
+    if (!previous) throw new Error("此题没有可切换的脚手架引用。");
+    if (previous.key === target.key && previous.include === nextInclude) return;
+    const updated = replaceInclude(code, previous.include, nextInclude);
+    if (updated === code) throw new Error("找不到此题的脚手架 include。");
+    const expanded = assembleC(updated, preset, nextInclude).code;
+    const checked = await compile(source, expanded, toolchain);
     try {
       if (checked.result.exitCode !== 0 || checked.result.reason)
         throw new Error("使用新版组件编译失败：" + checked.result.stderr.slice(0, 800));
     } finally {
       await fs.rm(checked.directory, { recursive: true, force: true });
     }
-  } finally { await fs.rm(temp, {force:true}); }
-  await withWorkspaceLock(path.join(base, "update.lock"), async () => {
-    const stage = path.join(base, ".stage-" + randomUUID());
-    const history = await safePath(root, ".accoding/scaffold-history/" + key);
-    await fs.mkdir(history, {recursive:true});
-    const backup = path.join(history, new Date().toISOString().replace(/[:.]/g,"-") +
-      "-" + randomUUID());
-    try {
-      await stagePreset(stage, installed.manifestPath, installed.version);
-      let moved = false;
-      try {
-        await fs.rename(active, backup);
-        moved = true;
-        await fs.rename(stage, active);
-      } catch (error) {
-        if (moved) await fs.rename(backup, active);
-        throw error;
-      }
-    } finally { await fs.rm(stage, { recursive:true, force:true }); }
+    if ((await fs.readFile(source, "utf8")) !== code) throw new Error("源码已改变，请重试。");
+    await workspace.update(current.bindingId, current.revision, (entry) => {
+      (entry.presetUndo ??= {})[target.key] = previous.key;
+      if (entry.initialSourceHash === hash(code)) entry.initialSourceHash = hash(updated);
+    });
+    if ((await fs.readFile(source, "utf8")) !== code) throw new Error("源码已改变，请重试。");
+    await atomicWrite(source, updated);
   });
 }
 
 export async function undoPresetUpdate(root: string, binding: Binding): Promise<void> {
-  const key = binding.bindingId;
-  const active = await safePath(root, ".accoding/scaffold/" + key);
-  const history = await safePath(root, ".accoding/scaffold-history/" + key);
-  const list = (await fs.readdir(history)).sort();
-  if (!list.length) throw new Error("没有可撤销的脚手架版本。");
-  await withWorkspaceLock(path.join(root, ".accoding/scaffold", "update.lock"), async () => {
-    const latest = path.join(history, list[list.length-1]);
-    const undo = path.join(history, "redo-" + randomUUID());
-    await fs.rename(active, undo);
-    try { await fs.rename(latest, active); }
-    catch (error) { await fs.rename(undo, active); throw error; }
+  const source = await safePath(root, binding.sourceFile);
+  await withWorkspaceLock(path.join(root, ".accoding", "presets", "switch.lock"), async () => {
+    const workspace = new WorkspaceStore(root);
+    const current = await workspace.read(binding.bindingId);
+    const code = await fs.readFile(source, "utf8");
+    const active = sharedInclude(root, source, code);
+    const previous = active && current.presetUndo?.[active.key];
+    if (!active || !previous) throw new Error("没有可撤销的共享脚手架版本。");
+    const directory = await sharedPresetPath(root, previous);
+    await loadPreset(directory);
+    const updated = replaceInclude(code, active.include, presetInclude(source, directory));
+    if (current.initialSourceHash === hash(code))
+      await workspace.update(current.bindingId, current.revision,
+        (entry) => { entry.initialSourceHash = hash(updated); });
+    if ((await fs.readFile(source, "utf8")) !== code) throw new Error("源码已改变，请重试。");
+    await atomicWrite(source, updated);
   });
 }

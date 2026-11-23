@@ -44,13 +44,17 @@ test("only referenced API and transitive dependencies are expanded", async () =>
 
 test("unsupported local includes and conditional exam includes fail", async () => {
   const preset = await loadPreset(manifest);
+  assert.throws(() => assembleC(
+    '#include "exam.h"\nunsigned long long exam_lcm_u64(unsigned long long a, unsigned long long b) { return a+b; }',
+    preset
+  ), /reserved preset function/);
   assert.throws(
     () => assembleC('#include "other.h"\n#include "exam.h"\n', preset),
     /other local headers/
   );
   assert.throws(
     () => assembleC('#if 1\n#include "exam.h"\n#endif\n', preset),
-    /unconditionally/
+    /only #include/
   );
   assert.throws(
     () => assembleC('int main(void) { return 0; }\n', preset),

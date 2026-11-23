@@ -76,6 +76,8 @@ export interface Binding {
   /** Optional stable, user-friendly directory for standalone workspaces. */
   problemDirectory?: string;
   selectedSubmissionLanguage?: string;
+  initialSourceHash?: string;
+  presetUndo?: Record<string, string>;
   fetchedAt: string;
   revision: number;
   cases: TestCase[];

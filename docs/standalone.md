@@ -22,7 +22,7 @@ Options: --root DIR for workspace commands, --preset MANIFEST during init, --lan
 
 Run the executable, log in, and start a contest or import one problem. Work in an external editor. The terminal starts with the last active unsolved problem; accepted problems are in a submenu. Testing all official samples successfully prompts whether to submit. Noninteractive editor tasks never block for confirmation; they display results and users invoke a separate submit command.
 
-The tool copies the selected scaffold preset into each question folder and generates exam.h and main.c for C99. Submission and testing use **immutable, content-addressed** source snapshots under each problem's `.accoding/generated/` directory, assembled from referenced functions and transitive dependencies. This prevents simultaneous editor tasks from overwriting the file being compiled. The original files are preserved, and source edits during an ongoing test prevent the subsequent tested-snapshot submission. C++17 supports standard compile/test/submit without the C99 toolbox. Custom test editing and rich problem rendering are outside v0.1.
+For C99, the course stores one shared copy of each preset version and each main.c references its full IDE header. The tool assembles the needed components into submit.c in an isolated temporary directory for checking and testing. The TUI can upload the bytes that passed local tests. The original files are preserved, and source edits during an ongoing test prevent the subsequent tested-snapshot submission. C++17 supports standard compile/test/submit without the C99 toolbox. Custom test editing and rich problem rendering are outside v0.1.
 
 The local OJ session uses macOS Keychain or Windows DPAPI; Linux currently has session-only storage. Submission IDs are stored for pending verdict queries. Network POST is never automatically re-sent when the outcome is uncertain. Only OJ AC hides a task as solved; post-contest problemset acceptance is not counted as contest AC.
 
@@ -52,7 +52,7 @@ accoding config preset "/Users/you/c-exam-kit/scaffold/presets/exam-io-c99"
 accoding config preset "/Users/you/c-exam-kit/scaffold/presets/exam-io-c99/manifest.json"
 ~~~
 
-Drag-and-drop also works in the TUI settings. Each new question receives an immutable **snapshot** of the selected version; updates to c-exam-kit do not change already initialized question code. The integration CI compiles the actual input/output macros including \`read_ints\` and \`print_ints\` into a standalone C99 source file.
+Drag-and-drop also works in the TUI settings. Each new question refers to the selected version's shared immutable snapshot; updates to c-exam-kit do not change already initialized question code. The integration CI compiles the actual input/output macros including \`read_ints\` and \`print_ints\` into a standalone C99 source file.
 
 ## Where data lives
 

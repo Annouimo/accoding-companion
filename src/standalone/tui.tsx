@@ -1,345 +1,515 @@
-import React, { useState } from "react";
-import { Box, Text, render, useInput } from "ink";
+import React, { useEffect, useRef, useState } from "react";
+import { Box, Text, render, useApp, useInput, useWindowSize } from "ink";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import type { StandaloneWorkflow, ResolvedProblem } from "./workflow";
-import { activityAccepted } from "./state";
-import { ask } from "./terminal";
-import { courseSettings } from "./workspaces";
+import { activityAccepted, type ApplicationState } from "./state";
 import { chooseUpdateTargets, type UpdateMode } from "./preset-manager";
+import { courseSettings, droppedPath } from "./workspaces";
 
-interface Item { id: string; label: string; note?: string }
-interface MenuProps {
-  title: string;
-  breadcrumb: string[];
-  items: Item[];
-  detail?: string;
-  onSelect: (id: string | undefined) => void;
+type Page = { group?: string; problem?: string };
+interface Row {
+  id: string;
+  label: string;
+  run: () => void | Promise<void>;
+}
+type Panel =
+  | { title: string; rows: Row[]; note?: string; cancel?: () => void; toggle?: (id: string) => void }
+  | { title: string; input: (text: string) => void | Promise<void>; secret?: boolean; cancel?: () => void };
+interface Group { id: string; title: string; problems: ResolvedProblem[] }
+
+function groupProblems(problems: ResolvedProblem[]): Group[] {
+  const groups = new Map<string, Group>();
+  for (const problem of problems) {
+    const target = problem.binding.problem.target;
+    const id = target.kind === "contest" ? target.contestId : "independent";
+    const directory = path.relative(problem.root, path.dirname(problem.source)).split(path.sep);
+    const title = id === "independent" ? "独立题目" :
+      directory.length > 1 && directory[0] !== "contests" ? directory[0] : "比赛 " + id;
+    const group = groups.get(id) ?? { id, title, problems: [] };
+    group.problems.push(problem);
+    groups.set(id, group);
+  }
+  for (const { problems } of groups.values())
+    problems.sort((a, b) => {
+      const left = a.binding.problem.target, right = b.binding.problem.target;
+      if (left.kind === "contest" && right.kind === "contest") {
+        const diff = (left.contestOrder ?? Infinity) - (right.contestOrder ?? Infinity);
+        if (diff) return diff;
+      }
+      return a.binding.problem.label.localeCompare(b.binding.problem.label, "zh", { numeric: true });
+    });
+  return [...groups.values()].sort((a, b) => a.title.localeCompare(b.title, "zh", { numeric: true }));
 }
 
-function Menu({ title, breadcrumb, items, detail, onSelect }: MenuProps) {
-  const [index, setIndex] = useState(0);
-  useInput((input, key) => {
-    if (key.upArrow) setIndex((n) => (n - 1 + items.length) % Math.max(items.length, 1));
-    else if (key.downArrow) setIndex((n) => (n + 1) % Math.max(items.length, 1));
-    else if (key.return) onSelect(items[index]?.id);
-    else if (key.escape || key.backspace) onSelect(undefined);
-    else if (input === "q" && !key.ctrl) onSelect(undefined);
-    else if (/^[1-9]$/.test(input)) {
-      const n = Number(input) - 1;
-      if (items[n]) onSelect(items[n].id);
-    }
+function openFolder(source: string): Promise<void> {
+  const command = process.platform === "win32" ? "explorer.exe" :
+    process.platform === "darwin" ? "open" : "xdg-open";
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [path.dirname(source)], {
+      detached: true, stdio: "ignore", windowsHide: true
+    });
+    child.once("error", reject);
+    child.once("spawn", () => { child.unref(); resolve(); });
   });
+}
+
+function Screen({ app }: { app: StandaloneWorkflow }) {
+  const { exit } = useApp();
+  const { rows: height } = useWindowSize();
+  const [state, setState] = useState<ApplicationState>();
+  const [problems, setProblems] = useState<ResolvedProblem[]>([]);
+  const [page, setPage] = useState<Page>({});
+  const [panel, setPanel] = useState<Panel>();
+  const [input, setInput] = useState("");
+  const [crumbFocus, setCrumbFocus] = useState<number>();
+  const [cursor, setCursor] = useState(0);
+  const [pendingOnly, setPendingOnly] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState("正在打开工作区…");
+  const [message, setMessage] = useState("");
+  const [testResult, setTestResult] = useState<Record<string, string>>({});
+  const [showDetails, setShowDetails] = useState(false);
+  const cursors = useRef(new Map<string, number>());
+  const active = useRef(true);
+  const locked = useRef(true);
+  const root = state?.lastWorkspace;
+  const groups = groupProblems(problems);
+  const group = groups.find((entry) => entry.id === page.group);
+  const problem = group?.problems.find((entry) => entry.binding.bindingId === page.problem);
+  const account = app.session.user?.id ?? state?.lastAccount ?? "offline";
+  const pageKey = JSON.stringify([root, group?.id, problem?.binding.bindingId]);
+  const crumbLabels = [root ? path.basename(root) : "Accoding Companion"];
+  if (group) crumbLabels.push(group.title);
+  if (problem) crumbLabels.push(problem.binding.problem.label + " · " + problem.binding.problem.title);
+
+  async function reload() {
+    const data = await app.state.load();
+    const directory = data.lastWorkspace;
+    const ready = directory && await fs.stat(path.join(directory, ".accoding", "workspace.json"))
+      .then(() => true, () => false);
+    const entries = ready ? await app.list(directory) : [];
+    if (active.current) { setState(data); setProblems(entries); }
+    return { data, entries };
+  }
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        await app.account(false).catch(() => undefined);
+        const { data, entries } = await reload();
+        const saved = data.tuiPage;
+        if (saved?.root === data.lastWorkspace) {
+          setPage({ group: saved?.group, problem: saved?.problem });
+        } else {
+          const user = app.session.user?.id ?? data.lastAccount ?? "offline";
+          const last = entries.find((entry) => app.state.isLastProblem(
+            data, entry.root, entry.binding.bindingId, user));
+          if (last) {
+            const target = last.binding.problem.target;
+            setPage({ group: target.kind === "contest" ? target.contestId : "independent",
+              problem: last.binding.bindingId });
+          }
+        }
+      } catch (error) { setMessage(String(error)); }
+      finally { locked.current = false; setBusy(""); }
+    })();
+    return () => { active.current = false; };
+  }, [app]);
+
+  function go(next: Page, defaultCursor = 0) {
+    cursors.current.set(pageKey, cursor);
+    const key = JSON.stringify([root, next.group, next.problem]);
+    setCursor(cursors.current.get(key) ?? defaultCursor);
+    setPage(next);
+    setPanel(undefined);
+    setCrumbFocus(undefined);
+    setMessage("");
+    setShowDetails(false);
+  }
+
+  function parent() {
+    if (problem) go({ group: group!.id }, group!.problems.indexOf(problem));
+    else if (group) go({}, groups.indexOf(group));
+  }
+
+  async function quit() {
+    if (locked.current) return;
+    locked.current = true;
+    try {
+      const data = await app.state.load();
+      if (root && data.lastWorkspace === root) {
+        data.tuiPage = { root, ...(group ? { group: group.id } : {}),
+          ...(problem ? { problem: problem.binding.bindingId } : {}) };
+        await app.state.save(data);
+      }
+    } finally { exit(); }
+  }
+
+  function open(next: Panel) {
+    setInput("");
+    setPanel(next);
+    setCrumbFocus(undefined);
+  }
+
+  function pick(title: string, choices: string[]): Promise<string | undefined> {
+    return new Promise((resolve) => open({ title, cancel: () => resolve(undefined),
+      rows: choices.map((choice) => ({
+        id: choice, label: choice, run: () => { setPanel(undefined); resolve(choice); }
+      })) }));
+  }
+
+  async function run<T>(label: string, operation: () => Promise<T>, log = true) {
+    if (locked.current) return;
+    locked.current = true;
+    setPanel(undefined);
+    setBusy(label);
+    setMessage("");
+    const output: string[] = [];
+    const originals = { log: console.log, warn: console.warn, error: console.error };
+    const collect = (...args: unknown[]) => {
+      output.push(args.map(String).join(" "));
+      if (log) setMessage(output.slice(-3).join("\n"));
+    };
+    Object.assign(console, { log: collect, warn: collect, error: collect });
+    try {
+      const result = await operation();
+      await reload();
+      return { result, output: output.join("\n") };
+    } catch (error) {
+      collect(error instanceof Error ? error.message : String(error));
+      setMessage(output.slice(-3).join("\n"));
+      return { output: output.join("\n") };
+    } finally {
+      Object.assign(console, originals);
+      locked.current = false;
+      setBusy("");
+    }
+  }
+
+  function login(after?: () => void) {
+    open({ title: "Accoding 账号", input: (username) => {
+      if (!username.trim()) return;
+      open({ title: "Accoding 密码", secret: true, input: async (password) => {
+        if (!password) return;
+        const result = await run("登录中…", async () => {
+          const remember = app.credentialBackend.persistent &&
+            await pick("在系统凭据存储中保持登录？", ["仅本次登录", "保持登录"]) === "保持登录";
+          await app.signIn(username.trim(), password, remember);
+          return true;
+        });
+        if (result?.result) after?.();
+      } });
+    } });
+  }
+
+  function chooseWorkspace() {
+    open({ title: "课程工作区", rows: [
+      ...(state?.recentWorkspaces ?? []).map((directory) => ({
+        id: directory, label: path.basename(directory), run: () => switchWorkspace(directory)
+      })),
+      { id: "new", label: "输入已有或新课程目录", run: () => open({
+        title: "课程目录（可粘贴或拖入路径）", input: async (directory) => {
+          if (directory.trim()) await switchWorkspace(directory.trim());
+        }
+      }) }
+    ] });
+  }
+
+  async function switchWorkspace(directory: string) {
+    const result = await run("正在打开工作区…", async () => {
+      const selected = await workspaceLanguage(directory);
+      if (selected === "cancel") return false;
+      await app.courseRoot(directory, selected);
+      return true;
+    });
+    if (result?.result) go({});
+  }
+
+  async function workspaceLanguage(directory: string): Promise<"c" | "cpp" | "cancel" | undefined> {
+    const exists = await fs.stat(path.join(droppedPath(directory), ".accoding", "workspace.json"))
+      .then(() => true, () => false);
+    if (exists) return;
+    const language = await pick("选择课程的编程语言", ["C99", "C++17"]);
+    return language === "C99" ? "c" : language === "C++17" ? "cpp" : "cancel";
+  }
+
+  function importPrompt(kind: "contest" | "problem") {
+    if (!app.session.user) { login(() => importPrompt(kind)); return; }
+    open({ title: kind === "contest" ? "比赛 ID 或链接" : "题目 ID 或链接",
+      input: async (value) => {
+        if (!value.trim()) return;
+        await run("正在导入…", async () => {
+          const directory = root ?? await new Promise<string | undefined>((resolve) =>
+            open({ title: "课程目录（可粘贴或拖入路径）", input: (directory) => {
+              setPanel(undefined); resolve(directory.trim() || undefined);
+            }, cancel: () => resolve(undefined) }));
+          if (!directory) return;
+          const language = await workspaceLanguage(directory);
+          if (language === "cancel") return;
+          if (kind === "contest") await app.importContest(value.trim(), directory, undefined, language);
+          else await app.importProblem(value.trim(), directory, undefined, language);
+        });
+      } });
+  }
+
+  function selectPreset(versions: string[]) {
+    const scopes: { title: string; mode: UpdateMode | "default" }[] = [
+      { title: "设为新题的默认版本", mode: "default" },
+      { title: "仅更新空题", mode: "empty" },
+      { title: "更新未 AC 的题", mode: "unaccepted" },
+      { title: "更新全部题", mode: "all" },
+      { title: problem ? "仅更新当前题" : "自选题目", mode: "selected" },
+    ];
+    return new Promise<{ version: string; mode: UpdateMode | "default" } | undefined>((resolve) => {
+      let version = 0, scope = 0;
+      function draw() {
+        open({ title: "脚手架版本", cancel: () => resolve(undefined), rows: [
+          { id: "version", label: "版本  " + versions[version],
+            run: () => { version = (version + 1) % versions.length; draw(); } },
+          { id: "scope", label: "范围  " + scopes[scope].title,
+            run: () => { scope = (scope + 1) % scopes.length; draw(); } },
+          { id: "next", label: "继续", run: () => {
+            setPanel(undefined); resolve({ version: versions[version], mode: scopes[scope].mode });
+          } }
+        ], note: "Enter 切换选中的版本或范围" });
+      }
+      draw();
+    });
+  }
+
+  function selectPresetProblems(): Promise<string[] | undefined> {
+    const checked = new Set<string>();
+    return new Promise((resolve) => {
+      function toggle(id: string) {
+        if (id === "next") return;
+        if (!checked.delete(id)) checked.add(id);
+        draw();
+      }
+      function draw() {
+        open({ title: "选择要更新的题目", cancel: () => resolve(undefined), toggle,
+          note: "空格勾选，完成后回到第一行确认", rows: [
+            { id: "next", label: "继续（已选 " + checked.size + " 题）",
+              run: () => { setPanel(undefined); resolve([...checked]); } },
+            ...groups.flatMap((entry) => entry.problems).filter((entry) =>
+              entry.source.toLowerCase().endsWith(".c")).map((entry) => {
+              const id = entry.binding.bindingId;
+              return { id, label: (checked.has(id) ? "✓ " : "○ ") +
+                entry.binding.problem.label + " · " + entry.binding.problem.title,
+                run: () => toggle(id) };
+            })
+          ] });
+      }
+      draw();
+    });
+  }
+
+  async function presets() {
+    if (!root) return;
+    await run("正在读取本机脚手架…", async () => {
+      if ((await courseSettings(root)).language !== "c") throw Error("此课程使用 C++17。");
+      const versions = await app.installedPresetVersions();
+      if (!versions.length) throw Error("尚未安装 C Exam Kit。请先运行安装器。");
+      const selection = await selectPreset(versions.map((entry) => entry.version));
+      if (!selection) return;
+      const { version, mode } = selection;
+      if (mode === "default") {
+        await app.setWorkspacePreset(version, root);
+        console.log("已设为新题默认版本：" + version);
+        return;
+      }
+      const selected = mode === "selected" ? (problem
+        ? [problem.binding.bindingId] : await selectPresetProblems()) : [];
+      if (!selected) return;
+      const chosen = await chooseUpdateTargets(root, problems.map((p) => p.binding), mode,
+        (binding) => state ? app.state.getActivity(state, root, binding.bindingId, account) : {},
+        selected);
+      if (!chosen.targets.length) { console.log("没有符合范围的题目。"); return; }
+      const confirm = "更新 " + chosen.targets.length + " 道题";
+      const excluded = chosen.excludedUnknown ? " · 状态未知 " + chosen.excludedUnknown + " 道" : "";
+      if (await pick("应用 " + version + excluded, ["取消", confirm]) !== confirm) return;
+      const result = await app.updateQuestionPresets(version, mode, selected, root);
+      setTestResult({});
+      console.log("更新 " + result.updated + " 道题");
+      for (const error of result.errors) console.log(error);
+    });
+  }
+
+  function settings() {
+    open({ title: "课程设置", rows: [
+      { id: "workspace", label: "切换或新建课程", run: chooseWorkspace },
+      ...(root ? [{ id: "preset", label: "脚手架版本", run: presets }] : []),
+      { id: "login", label: app.session.user ? "切换账号" : "登录 Accoding", run: login },
+      ...(app.session.user ? [{ id: "logout", label: "退出登录", run: async () => {
+        await run("正在退出登录…", () => app.logout());
+      } }] : [])
+    ] });
+  }
+
+  async function test() {
+    if (!problem) return;
+    const result = await run("正在运行样例…", () => app.test(problem), false);
+    if (result) setTestResult((all) => ({ ...all, [problem.source]: result.output }));
+    setShowDetails(result?.result !== true);
+    if (result?.result === true) setCursor(0);
+  }
+
+  async function submit(tested: boolean) {
+    if (!problem) return;
+    const code = tested ? app.testedCode(problem.source) : undefined;
+    if (tested && code === undefined) { setMessage("请先重新运行样例。"); return; }
+    await run("正在提交…", () => app.submit(problem, undefined, code,
+      (choices, fallback) => pick(fallback ? "题库提交语言（不计入比赛）" : "提交语言", choices)));
+  }
+
+  function more() {
+    if (!problem) return;
+    open({ title: "本题操作", rows: [
+      { id: "status", label: "刷新本题评测状态", run: async () => {
+        await run("正在查询本题结果…", () => app.status(root, false, problem.binding.problem.target));
+      } },
+      { id: "direct", label: "跳过样例直接提交", run: () => open({
+        title: "跳过样例并编译提交？", rows: [
+          { id: "cancel", label: "取消", run: () => setPanel(undefined) },
+          { id: "send", label: "确认提交", run: () => submit(false) }
+        ]
+      }) },
+      ...(problem.source.toLowerCase().endsWith(".c") ? [
+        { id: "preset", label: "更换脚手架版本", run: presets },
+        { id: "undo", label: "撤销本题上次脚手架更新", run: async () => {
+          await run("正在撤销…", () => app.undoQuestionPreset(problem.binding.bindingId, root));
+        } }
+      ] : [])
+    ] });
+  }
+
+  const accepted = (entry: ResolvedProblem) => Boolean(state && root && activityAccepted(
+    app.state.getActivity(state, root, entry.binding.bindingId, account)));
+  const verdict = (entry: ResolvedProblem) => state && root
+    ? app.state.getActivity(state, root, entry.binding.bindingId, account).verdict : undefined;
+  const passed = problem && Boolean(app.testedCode(problem.source));
+  const result = problem && testResult[problem.source];
+  const onlyPending = group && pendingOnly[pageKey];
+  const entries: Row[] = problem ? [
+    ...(passed ? [{ id: "submit", label: "提交本次通过的版本", run: () => submit(true) }] : []),
+    { id: "test", label: passed ? "重新运行样例" : "运行样例", run: test },
+    { id: "open", label: "打开代码目录", run: async () => {
+      try { await openFolder(problem.source); }
+      catch (error) { setMessage(String(error)); }
+    } },
+    ...(result ? [{ id: "details", label: showDetails ? "收起测试详情" : "查看测试详情",
+      run: () => setShowDetails(!showDetails) }] : []),
+    { id: "more", label: "本题其他操作", run: more }
+  ] : group ? [
+    ...group.problems.filter((entry) => !onlyPending || !accepted(entry)).map((entry) => ({
+      id: entry.binding.bindingId,
+      label: entry.binding.problem.label + " · " + entry.binding.problem.title +
+        "   " + (accepted(entry) ? "AC" : verdict(entry) || "未提交"),
+      run: () => go({ group: group.id, problem: entry.binding.bindingId })
+    })),
+    ...(group.problems.some(accepted) ? [{ id: "filter", label: onlyPending ? "显示全部题目" : "仅看未 AC",
+      run: () => { setPendingOnly({ ...pendingOnly, [pageKey]: !onlyPending }); setCursor(0); } }] : []),
+    { id: "sync", label: "同步本组", run: async () => {
+      await run("正在同步…", () => app.sync(root, group.id));
+    } }
+  ] : [
+    ...groups.map((entry) => ({ id: entry.id, label: entry.title + "   " +
+      entry.problems.filter(accepted).length + "/" + entry.problems.length + " AC",
+      run: () => go({ group: entry.id }) })),
+    { id: "import", label: "导入", run: () => open({ title: "导入", rows: [
+      { id: "contest", label: "导入比赛 / 作业", run: () => importPrompt("contest") },
+      { id: "problem", label: "导入独立题目", run: () => importPrompt("problem") }
+    ] }) },
+    { id: "settings", label: "设置", run: settings }
+  ];
+
+  const [panelCursor, setPanelCursor] = useState(0);
+  useEffect(() => setPanelCursor(0), [panel?.title]);
+  const list = panel ? ("rows" in panel ? panel.rows : []) : entries;
+  const selected = Math.min(panel ? panelCursor : cursor, Math.max(0, list.length - 1));
+  const visibleCount = Math.max(3, height - 12);
+  const start = Math.max(0, Math.min(selected - Math.floor(visibleCount / 2), list.length - visibleCount));
+  useInput((char, key) => {
+    if (key.ctrl && char === "c") {
+      if (panel) {
+        panel.cancel?.();
+        setPanel(undefined);
+      } else if (!locked.current) void quit();
+      else if (process.listenerCount("SIGINT")) process.emit("SIGINT");
+      return;
+    }
+    if (busy && !panel) return;
+    if (panel && "input" in panel) {
+      if (key.escape) { panel.cancel?.(); setPanel(undefined); }
+      else if (key.return) void panel.input(input);
+      else if (key.backspace || key.delete) setInput([...input].slice(0, -1).join(""));
+      else if (!key.ctrl && !key.meta && !key.tab && !key.upArrow && !key.downArrow &&
+          !key.leftArrow && !key.rightArrow && char) setInput(input + char.replace(/[\r\n]/g, ""));
+      return;
+    }
+    if (key.escape) {
+      if (panel) { panel.cancel?.(); setPanel(undefined); }
+      else if (crumbFocus !== undefined) setCrumbFocus(undefined);
+      else parent();
+      return;
+    }
+    if (!panel && !key.ctrl && char === "q") { void quit(); return; }
+    if (!panel && key.tab) {
+      setCrumbFocus(crumbFocus === undefined ? Math.max(0, crumbLabels.length - 2) : undefined);
+      return;
+    }
+    if (!panel && crumbFocus !== undefined) {
+      if (key.leftArrow) setCrumbFocus(Math.max(0, crumbFocus - 1));
+      else if (key.rightArrow) setCrumbFocus(Math.min(crumbLabels.length - 1, crumbFocus + 1));
+      else if (key.return) {
+        if (crumbFocus === 0 && group) go({}, groups.indexOf(group));
+        else if (crumbFocus === 1 && problem) parent();
+        else setCrumbFocus(undefined);
+      }
+      return;
+    }
+    if (key.upArrow || key.downArrow)
+      (panel ? setPanelCursor : setCursor)(Math.min(Math.max(0, list.length - 1),
+        Math.max(0, selected + (key.upArrow ? -1 : 1))));
+    else if (key.return) void list[selected]?.run();
+    else if (char === " " && panel && "rows" in panel && list[selected])
+      panel.toggle?.(list[selected].id);
+  });
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
-      <Text dimColor>{breadcrumb.join("  ›  ")}</Text>
-      <Text bold color="cyan">{title}</Text>
-      <Text> </Text>
-      {detail ? <Box marginBottom={1}><Text wrap="wrap">{detail}</Text></Box> : null}
-      {items.map((item, i) => (
-        <Box key={item.id} flexDirection="row" gap={1}>
-          <Text color={index === i ? "cyan" : undefined}>
-            {index === i ? "❯" : " "}
-          </Text>
-          <Text bold={index === i} color={index === i ? "cyan" : undefined}>
-            {item.label}
-          </Text>
-          {item.note ? <Text dimColor> {item.note}</Text> : null}
-        </Box>
-      ))}
-      <Text> </Text>
-      <Text dimColor>↑↓ 选择   Enter 确定   Esc 返回   Q 退出/返回</Text>
+    <Box flexDirection="column" paddingX={1}>
+      <Box>
+        {crumbLabels.map((label, index) => <Text key={index}>
+          {index ? " › " : ""}<Text bold={index === crumbLabels.length - 1}
+            inverse={crumbFocus === index}>{label}</Text>
+        </Text>)}
+      </Box>
+      {!panel && problem ? <Text dimColor>
+        {path.basename(problem.source)} · OJ {verdict(problem) ?? "未提交"}
+      </Text> : null}
+      {!panel && result ? <Text color={passed ? "green" : undefined}>
+        {showDetails ? result.split("\n").slice(0, 5).join("\n") :
+          passed ? "本地样例 " + result.split("\n").filter((line) => line.endsWith(" : PASS")).length + " 个通过" : "本地样例未通过"}
+      </Text> : null}
+      {message ? <Text>{message}</Text> : null}
+      {busy && !panel ? <Text color="cyan">{busy}</Text> : null}
+      {panel ? <Text bold>{panel.title}</Text> : null}
+      {panel && "rows" in panel && panel.note ? <Text dimColor>{panel.note}</Text> : null}
+      {panel && "input" in panel ? <Text color="cyan">{panel.secret ? "•".repeat([...input].length) : input}▏</Text> : null}
+      {list.slice(start, start + visibleCount).map((row, index) =>
+        <Text key={row.id} color={crumbFocus === undefined && selected === start + index ? "cyan" : undefined}>
+          {crumbFocus === undefined && selected === start + index ? "❯ " : "  "}{row.label}
+        </Text>)}
+      {!busy && list.length > visibleCount ? <Text dimColor>{selected + 1}/{list.length}</Text> : null}
+      <Text dimColor>{panel && "input" in panel ? "Enter 确定 · Esc 取消" :
+        crumbFocus !== undefined ? "← → 选择路径 · Enter 跳转 · Tab 回到列表" :
+        panel ? "↑ ↓ 选择 · Enter 确定 · Esc 返回" :
+        "↑ ↓ 选择 · Enter 打开 · Tab 路径 · " + (group ? "Esc 返回 · " : "") + "Q 退出"}</Text>
     </Box>
   );
 }
 
-async function choose(
-  title: string, breadcrumb: string[], items: Item[], detail?: string
-): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const mounted = render(<Menu title={title} breadcrumb={breadcrumb}
-      items={items} detail={detail} onSelect={(id) => {
-        if (settled) return;
-        settled = true;
-        mounted.unmount();
-        resolve(id);
-      }}/>, { exitOnCtrlC: false });
-  });
-}
-
-async function transcript(run: () => Promise<unknown>): Promise<{
-  output: string; result?: unknown; failed: boolean
-}> {
-  const old = { log: console.log, error: console.error, warn: console.warn };
-  const lines: string[] = [];
-  const record = (...args: unknown[]) => {
-    lines.push(args.map((x) => x instanceof Error ? x.message : String(x)).join(" "));
-  };
-  console.log = record;
-  console.error = record;
-  console.warn = record;
-  let result: unknown, failed = false;
-  try { result = await run(); }
-  catch (error) { failed = true; record(error); }
-  finally { Object.assign(console, old); }
-  return { output: lines.slice(-35).join("\n") || "操作完成。", result, failed };
-}
-
-function crumbs(root: string, problem?: ResolvedProblem, section?: string): string[] {
-  const items = [path.basename(root)];
-  if (problem) {
-    const relative = path.relative(root, path.dirname(problem.source));
-    const folders = relative.split(path.sep).filter(Boolean);
-    if (folders.length > 1) items.push(folders[0]);
-    items.push(problem.binding.problem.label + " · " + problem.binding.problem.title);
-  }
-  if (section) items.push(section);
-  return items;
-}
-
-async function openFolder(source: string): Promise<void> {
-  const command = process.platform === "win32" ? "explorer.exe" :
-    process.platform === "darwin" ? "open" : "xdg-open";
-  const child = spawn(command, [path.dirname(source)], {
-    detached: true, stdio: "ignore", windowsHide: true
-  });
-  child.unref();
-}
-
-async function pickProblem(
-  app: StandaloneWorkflow, root: string,
-  all: ResolvedProblem[]
-): Promise<ResolvedProblem | undefined> {
-  const state = await app.state.load();
-  const account = app.session.user?.id ?? state.lastAccount ?? "offline";
-  const ac = (problem: ResolvedProblem) =>
-    activityAccepted(app.state.getActivity(state, root, problem.binding.bindingId, account));
-  let showAccepted = false;
-  for (;;) {
-    const available = all.filter((x) => showAccepted || !ac(x));
-    const acceptedCount = all.filter(ac).length;
-    const entries: Item[] = available.map((p, i) => ({
-      id: String(i), label: p.binding.problem.label + " · " + p.binding.problem.title,
-      note: ac(p) ? "AC" : (
-        app.state.getActivity(state, root, p.binding.bindingId, account).verdict || "未提交"
-      )
-    }));
-    entries.push({
-      id: "toggle", label: showAccepted ? "隐藏已 AC 题目" : "展开已 AC 题目",
-      note: "(" + acceptedCount + ")"
-    });
-    const selected = await choose("选择题目", crumbs(root), entries);
-    if (selected === undefined) return;
-    if (selected === "toggle") { showAccepted = !showAccepted; continue; }
-    const picked = available[Number(selected)];
-    if (picked) {
-      await app.state.rememberProblem(root, picked.binding.bindingId, account,
-        { sourceFile: picked.source });
-      return picked;
-    }
-  }
-}
-
 export async function startFullScreenTui(app: StandaloneWorkflow): Promise<void> {
-  try { await app.account(false); } catch { /* Local workspaces are still usable. */ }
-  for (;;) {
-    const state = await app.state.load();
-    const root = state.lastWorkspace;
-    const initialized = Boolean(root && await fs.stat(path.join(root, ".accoding", "workspace.json"))
-      .then(() => true, () => false));
-    const all = initialized ? await app.list(root) : [];
-    const account = app.session.user?.id ?? state.lastAccount ?? "offline";
-    const current = all.find((p) =>
-      app.state.isLastProblem(state, p.root, p.binding.bindingId, account)) ||
-      all[0];
-    const base = root ? path.basename(root) : "Accoding Companion";
-    const header = current ? crumbs(root!, current) : [base];
-    const entries: Item[] = current ? [
-      { id: "test", label: "本地测试", note: path.basename(current.source) },
-      { id: "submit", label: "直接提交" },
-      { id: "folder", label: "打开代码文件夹" },
-      { id: "pick", label: "切换题目" },
-      { id: "contests", label: "课程 / 比赛总览" },
-      { id: "importContest", label: "导入新比赛" },
-      { id: "importProblem", label: "导入独立题目" },
-      { id: "settings", label: "设置 / 工作区" },
-      { id: "exit", label: "退出" }
-    ] : [
-      { id: "importContest", label: "导入比赛" },
-      { id: "importProblem", label: "导入独立题目" },
-      { id: "settings", label: "设置 / 切换工作区" },
-      { id: "login", label: "登录 Accoding" },
-      { id: "exit", label: "退出" }
-    ];
-    const active = current ? current.binding.problem.title + "\n" +
-      (await courseSettings(root!)).language.toUpperCase() +
-      " · " + current.source + "\n" +
-      (app.state.getActivity(state, root!, current.binding.bindingId, account).verdict || "未提交") :
-      "当前没有已导入的题目。";
-    const action = await choose("Accoding Companion", header, entries,
-      active + "\n登录：" + (app.session.user?.id || "未连接"));
-    if (!action || action === "exit") return;
-    if (action === "folder" && current) { await openFolder(current.source); continue; }
-    if (action === "pick" && root) { await pickProblem(app, root, all); continue; }
-    if (action === "test" && current) {
-      const outcome = await transcript(() => app.test(current));
-      const choice = await choose("本地测试结果", crumbs(root!, current, "本地测试"),
-        outcome.result === true && !outcome.failed
-          ? [{ id: "submit", label: "提交刚刚通过测试的源码" },
-            { id: "back", label: "返回当前题目" }]
-          : [{ id: "back", label: "返回修改代码" }], outcome.output);
-      if (choice === "submit") {
-        const confirmed = await choose("确认 OJ 提交", crumbs(root!, current),
-          [{ id: "yes", label: "确认提交" }, { id: "no", label: "取消" }]);
-        if (confirmed === "yes") {
-          const result = await transcript(() =>
-            app.submit(current, undefined, app.testedCode(current.source)));
-          await choose("OJ 提交", crumbs(root!, current, "结果"),
-            [{ id: "back", label: "返回题目" }], result.output);
-        }
-      }
-      continue;
-    }
-    if (action === "submit" && current) {
-      const confirmed = await choose("直接提交", crumbs(root!, current),
-        [{ id: "yes", label: "展开并编译后提交（跳过样例）" },
-         { id: "no", label: "取消" }]);
-      if (confirmed === "yes") {
-        const result = await transcript(() => app.submit(current));
-        await choose("OJ 提交", crumbs(root!, current, "结果"),
-          [{ id: "back", label: "返回题目" }], result.output);
-      }
-      continue;
-    }
-    if (action === "login") {
-      const result = await transcript(() => app.login());
-      await choose("登录结果", [base, "账号"], [{ id: "back", label: "返回" }], result.output);
-      continue;
-    }
-    if (action === "importContest" || action === "importProblem") {
-      const id = await ask(action === "importContest" ? "比赛 ID 或链接" : "题目 ID 或链接");
-      if (id) {
-        const result = await transcript(() =>
-          action === "importContest" ? app.importContest(id) : app.importProblem(id));
-        await choose("导入结果", [base, "导入"], [{ id: "back", label: "返回" }], result.output);
-      }
-      continue;
-    }
-    if (action === "contests" && root) {
-      const contests = new Map<string, ResolvedProblem[]>();
-      for (const p of all) {
-        const target = p.binding.problem.target;
-        const id = target.kind === "contest" ? target.contestId : "独立题目";
-        const list = contests.get(id) || [];
-        list.push(p); contests.set(id, list);
-      }
-      const ids = [...contests.keys()];
-      const selected = await choose("课程总览", [base], ids.map((id, i) =>
-        ({ id: String(i), label: id === "独立题目" ? id : "比赛 " + id,
-          note: (contests.get(id)?.length || 0) + " 题" })));
-      if (selected !== undefined) await pickProblem(app, root, contests.get(ids[Number(selected)]) || []);
-      continue;
-    }
-    if (action === "settings") {
-      const selected = await choose("设置", [base, "设置"], [
-        { id: "workspace", label: "选择 / 新建课程工作区" },
-        { id: "preset", label: "脚手架版本和题目更新（本地）" },
-        { id: "sync", label: "同步远程题目" },
-        { id: "status", label: "查询 OJ 提交状态" },
-        { id: "login", label: "登录 / 切换账号" },
-        { id: "logout", label: "退出登录" }
-      ], "软件和脚手架的联网检查与下载，请运行安装器。");
-      if (!selected) continue;
-      let result: { output: string } = {output:"未执行操作。"};
-      if (selected === "workspace") {
-        const known = (await app.state.load()).recentWorkspaces || [];
-        const choice = await choose("课程工作区", [base, "工作区"], [
-          ...known.map((dir, index) => ({id:String(index),label:path.basename(dir),note:dir})),
-          {id:"new",label:"添加已有工作区 / 新建课程文件夹"}
-        ]);
-        const raw = choice === "new" ?
-          await ask("课程文件夹（可拖入路径）", root) :
-          choice !== undefined ? known[Number(choice)] : undefined;
-        if (raw) result = await transcript(() => app.courseRoot(raw));
-      } else if (selected === "preset") {
-        if (!root) {
-          result = { output: "请先创建课程工作区。" };
-        } else {
-          const versions = await app.installedPresetVersions();
-          if (!versions.length) {
-            result = { output: "尚无通过安装器下载的脚手架版本。\n请运行 install.sh 或 install.ps1 下载。" };
-          } else {
-            const version = await choose("选择本机脚手架版本", [base,"脚手架"],
-              versions.map(v => ({id:v.version,label:"C Exam Kit " + v.version})));
-            if (version) {
-              const act = await choose("版本 "+version, [base,"脚手架",version], [
-                { id:"default", label:"设为课程工作区默认版本（用于新题目）" },
-                { id:"empty", label:"更新所有空题目（推荐）" },
-                { id:"unaccepted", label:"更新所有未 AC 题目" },
-                { id:"all", label:"更新所有题目" },
-                { id:"selected", label:"自选更新题目" },
-                { id:"undo", label:"撤销某道题的上一次脚手架更新" }
-              ]);
-              if (act === "default") {
-                result = await transcript(() => app.setWorkspacePreset(version, root));
-              } else if (act === "undo") {
-                const chosen = await choose("选择要回退的题目", [base,"脚手架","回退"],
-                  all.filter(p=>p.source.endsWith(".c")).map(p=>({
-                    id:p.binding.bindingId,
-                    label:p.binding.problem.label + " · " + p.binding.problem.title
-                  })));
-                if (chosen) result = await transcript(() => app.undoQuestionPreset(chosen,root));
-              } else if (act && ["empty","unaccepted","all","selected"].includes(act)) {
-                const mode = act as UpdateMode;
-                let ids: string[] = [];
-                if (mode === "selected") {
-                  const checked = new Set<string>();
-                  const candidates = all.filter(p=>p.source.endsWith(".c"));
-                  for (;;) {
-                    const item = await choose("空格选择的等效方式：Enter 勾选/取消",
-                      [base,"脚手架","自选题目"],[
-                      {id:"done",label:"确认选择 ("+checked.size+")"},
-                      ...candidates.map(p=>({
-                        id:p.binding.bindingId,
-                        label:(checked.has(p.binding.bindingId)?"[x] ":"[ ] ")+
-                          p.binding.problem.label+" · "+p.binding.problem.title
-                      }))
-                    ]);
-                    if (!item || item==="done") break;
-                    if (checked.has(item)) checked.delete(item); else checked.add(item);
-                  }
-                  ids=[...checked];
-                }
-                const state = await app.state.load();
-                const user = app.session.user?.id || state.lastAccount || "offline";
-                const preview = await chooseUpdateTargets(root,
-                  all.map(x=>x.binding),mode,
-                  b=>app.state.getActivity(state,root,b.bindingId,user),ids);
-                const listed = preview.targets.slice(0,15)
-                  .map(b=>b.problem.label+" · "+b.problem.title).join("\n");
-                const agree = await choose("脚手架更新预览", [base,"脚手架","预览"], [
-                  {id:"yes",label:"确认更新 "+preview.targets.length+" 道题"},
-                  {id:"no",label:"取消"}
-                ], listed+"\n状态未知、未纳入："+
-                  preview.excludedUnknown+" 道。将保留源码与旧组件备份。");
-                if (agree==="yes" && preview.targets.length) {
-                  result=await transcript(async()=>{
-                    const r=await app.updateQuestionPresets(version,mode,ids,root);
-                    console.log("更新成功："+r.updated+" 道；状态未知："+r.excludedUnknown);
-                    for(const err of r.errors) console.log("跳过："+err);
-                  });
-                }
-              }
-            }
-          }
-        }
-      } else if (selected === "sync") result = await transcript(() => app.sync());
-      else if (selected === "status") result = await transcript(() => app.status(root, true));
-      else if (selected === "login") result = await transcript(() => app.login());
-      else if (selected === "logout") result = await transcript(() => app.logout());
-      await choose("操作结果", [base, "设置"], [{ id:"back", label:"返回" }], result.output);
-    }
-  }
+  const screen = render(<Screen app={app}/>, { exitOnCtrlC: false, patchConsole: false, alternateScreen: true });
+  await screen.waitUntilExit();
 }

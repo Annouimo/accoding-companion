@@ -13,11 +13,12 @@ import { sendSubmission } from "../submissions/send";
 import { SubmissionStore, isPending } from "../submissions/store";
 import { monitorSubmissions } from "../submissions/monitor";
 import { bindingId, hash, parseImport, type Binding, type Problem, type Target } from "../model";
-import { assembleC, renderHeader, loadPreset, type LoadedPreset } from "./scaffold";
+import { assembleC, loadPreset, type LoadedPreset } from "./scaffold";
 import { readableStatement } from "../problems/statement";
 import { StateStore, isAccepted, activityAccepted } from "./state";
 import { installedPresets, presetForVersion, setCoursePresetVersion,
-  chooseUpdateTargets, applyPresetVersion, undoPresetUpdate,
+  chooseUpdateTargets, applyPresetVersion, undoPresetUpdate, saveSharedPreset,
+  sharedPresetPath, sharedInclude, presetInclude,
   type UpdateMode } from "./preset-manager";
 import { credentialsBackend } from "./secrets";
 import { ask, confirm, interactive, select, password } from "./terminal";
@@ -59,23 +60,6 @@ async function fileExists(file: string): Promise<boolean> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
-}
-
-async function savePresetSnapshot(directory: string, preset: LoadedPreset): Promise<void> {
-  const location = directory;
-  const manifest = path.join(location, "manifest.json");
-  if (await fileExists(manifest)) return;
-  await fs.mkdir(location, { recursive: true });
-  for (const component of preset.manifest.components) {
-    const target = path.resolve(location, component.source);
-    const inside = path.relative(location, target);
-    if (!inside || inside.startsWith(".." + path.sep) || path.isAbsolute(inside))
-      throw new Error("Invalid component source location.");
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, preset.code.get(component.id)!, { flag: "wx" });
-  }
-  await fs.writeFile(manifest, JSON.stringify(preset.manifest, null, 2) + "\n",
-    { encoding: "utf8", flag: "wx" });
 }
 
 function sourceFor(binding: Binding, root: string): string {
@@ -126,6 +110,11 @@ export class StandaloneWorkflow {
     const remember = this.credentialBackend.persistent
       ? await confirm("保持登录并将凭据保存在系统安全存储中？选择“否”仅本次运行有效", true)
       : false;
+    await this.signIn(username, pass, remember);
+  }
+
+  async signIn(username: string, pass: string, remember: boolean): Promise<void> {
+    remember = remember && this.credentialBackend.persistent;
     await this.credentialBackend.setSessionOnly(!remember);
     const user = await this.session.signIn({ username, password: pass }, remember);
     this.restored = true;
@@ -167,61 +156,29 @@ export class StandaloneWorkflow {
     return root;
   }
 
-  private async ensureScaffold(root: string, binding: Binding, preset?: LoadedPreset): Promise<void> {
+  private async ensureScaffold(root: string, binding: Binding, preset?: LoadedPreset, version?: string): Promise<void> {
     // C++ workspaces never receive the C99 exam library.
     const config = await courseSettings(root);
     if (config.language !== "c") return;
     if (!preset) throw new Error("C99 课程缺少 C Exam Kit，请先安装数据包并选择课程脚手架版本。");
-    const folder = path.dirname(sourceFor(binding, root));
-    const location = path.join(root, ".accoding", "scaffold", binding.bindingId);
-    const existing = path.join(location, "manifest.json");
-    const chosen = (await fileExists(existing)) ? await loadPreset(existing) : preset;
-    await savePresetSnapshot(location, chosen);
-    const implementation = path.join(location, "expanded.h");
-    try {
-      await fs.writeFile(implementation, renderHeader(chosen), { encoding: "utf8", flag: "wx" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
-    // A tiny user-visible header keeps ordinary IDE compilation working.
-    const relative = path.relative(folder, implementation).split(path.sep).join("/");
-    const wrapper = "#ifndef ACCODING_EXAM_WRAPPER_H\n#define ACCODING_EXAM_WRAPPER_H\n" +
-      '#include "' + relative + '"\n#endif\n';
-    try {
-      await fs.writeFile(path.join(folder, chosen.manifest.headerFile),
-        wrapper, { encoding: "utf8", flag: "wx" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
     const source = sourceFor(binding, root);
-    const original = await fs.readFile(source, "utf8");
-    if (original === cTemplate) {
-      await fs.writeFile(source,
-        '#include "' + chosen.manifest.headerFile + '"\n' + original, "utf8");
-    }
+    if (await fs.readFile(source, "utf8") !== cTemplate) return;
+    const legacy = path.join(root, ".accoding", "scaffold", binding.bindingId, "manifest.json");
+    if (await fileExists(legacy)) return;
+    const include = presetInclude(source, (await saveSharedPreset(root, preset, version)).directory);
+    if (await fs.readFile(source, "utf8") === cTemplate)
+      await atomicWrite(source, '#include "' + include + '"\n' + cTemplate);
   }
 
   private async ensureStatement(root: string, binding: Binding): Promise<void> {
     const folder = path.dirname(sourceFor(binding, root));
-    const mark = await safePath(root,
-      ".accoding/initial-hashes/" + binding.bindingId + ".json");
-    await fs.mkdir(path.dirname(mark), { recursive: true });
-    const currentCode = await fs.readFile(sourceFor(binding, root), "utf8");
+    const source = sourceFor(binding, root);
+    const currentCode = await fs.readFile(source, "utf8");
     const starter = currentCode === cTemplate || currentCode === cppTemplate ||
-      (currentCode.endsWith(cTemplate) &&
-        /^#include "[A-Za-z_][A-Za-z0-9_.-]*\.h"\n$/.test(
-          currentCode.slice(0, -cTemplate.length)));
-    // Never label a previously edited solution as "empty" simply because
-    // it does not yet have an initialization hash (old workspace / migration).
-    if (starter) {
-      try {
-        await fs.writeFile(mark, JSON.stringify({
-          sourceHash: hash(currentCode)
-        }) + "\n", { encoding: "utf8", flag: "wx" });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
-    }
+      (currentCode.endsWith(cTemplate) && Boolean(sharedInclude(root, source, currentCode)));
+    if (starter && !binding.initialSourceHash)
+      await new WorkspaceStore(root).update(binding.bindingId, binding.revision,
+        (entry) => { entry.initialSourceHash ??= hash(currentCode); });
     const readable = path.join(folder, "题目.md");
     try {
       await fs.writeFile(readable, readableStatement(binding.problem),
@@ -253,6 +210,8 @@ export class StandaloneWorkflow {
     if (root) {
       const config = await courseSettings(root);
       if (config.presetVersion) {
+        const shared = await sharedPresetPath(root, config.presetVersion);
+        if (await fileExists(path.join(shared, "manifest.json"))) return loadPreset(shared);
         const found = await presetForVersion(config.presetVersion);
         return loadPreset(found.manifestPath);
       }
@@ -300,6 +259,7 @@ export class StandaloneWorkflow {
     for (const b of targets) {
       try {
         await applyPresetVersion(root, b, found, compiler);
+        this.tested.delete(sourceFor(b, root));
         updated++;
       } catch (error) {
         errors.push(b.problem.label + " " + b.problem.title + ": " +
@@ -315,6 +275,7 @@ export class StandaloneWorkflow {
       b => b.bindingId === bindingId);
     if (!found) throw new Error("题目不存在。");
     await undoPresetUpdate(root, found);
+    this.tested.delete(sourceFor(found, root));
   }
 
   async importContest(value: string, rootArg?: string, presetPath?: string,
@@ -328,13 +289,14 @@ export class StandaloneWorkflow {
     const root = await this.courseRoot(rootArg, language);
     // Check availability before creating contest files.
     const preset = await this.activePreset(presetPath, root);
+    const version = presetPath ? undefined : (await courseSettings(root)).presetVersion;
     const folder = await ensureContestDirectory(root, snapshot.id, snapshot.title);
     const workspace = new WorkspaceStore(root);
     const imported = await syncContest(workspace, snapshot, undefined, undefined,
       (problem) => readableProblemDirectory(root, problem, folder));
     for (const binding of imported) {
       if (binding.unavailable) continue;
-      await this.ensureScaffold(root, binding, preset);
+      await this.ensureScaffold(root, binding, preset, version);
       await this.ensureStatement(root, binding);
     }
     // Sync verdicts before choosing a default, so known AC tasks are not selected.
@@ -404,37 +366,39 @@ export class StandaloneWorkflow {
     const root = await this.courseRoot(rootArg, language);
     // An unavailable C99 data package should not leave a partially imported problem.
     const preset = await this.activePreset(presetPath, root);
+    const version = presetPath ? undefined : (await courseSettings(root)).presetVersion;
     const workspace = new WorkspaceStore(root);
     const binding = await workspace.import(problem,
       await readableProblemDirectory(root, problem));
-    await this.ensureScaffold(root, binding, preset);
+    await this.ensureScaffold(root, binding, preset, version);
     await this.ensureStatement(root, binding);
     await this.state.rememberProblem(root, binding.bindingId, account);
     console.log("已导入：" + binding.problem.title);
     console.log("目录：" + path.dirname(sourceFor(binding, root)));
   }
 
-  async sync(rootArg?: string): Promise<void> {
+  async sync(rootArg?: string, group?: string): Promise<void> {
     await this.account();
     const root = await this.workspaceRoot(rootArg);
     const workspace = new WorkspaceStore(root);
     const all = await workspace.list();
     const contestIds = [...new Set(all.flatMap((b) =>
       b.problem.target.kind === "contest" ? [b.problem.target.contestId] : []))];
-    for (const id of contestIds) {
+    for (const id of contestIds.filter((id) => !group || id === group)) {
       const snapshot = await fetchContestSnapshotForImport(this.session.client, id);
       const folder = await ensureContestDirectory(root, snapshot.id, snapshot.title);
       const bindings = await syncContest(workspace, snapshot, undefined, undefined,
         (problem) => readableProblemDirectory(root, problem, folder));
       for (const binding of bindings) {
         if (!binding.unavailable)
-          await this.ensureScaffold(root, binding, await this.activePreset(undefined, root));
+          await this.ensureScaffold(root, binding, await this.activePreset(undefined, root),
+            (await courseSettings(root)).presetVersion);
         if (!binding.unavailable) await this.ensureStatement(root, binding);
       }
       console.log("比赛 " + id + " 已同步。");
     }
     for (const binding of all) {
-      if (binding.problem.target.kind !== "problemset") continue;
+      if (binding.problem.target.kind !== "problemset" || (group && group !== "independent")) continue;
       const problem = await new ProblemsetAdapter(
         binding.problem.target.service === "admin"
           ? this.session.client.adminReader()
@@ -477,26 +441,6 @@ export class StandaloneWorkflow {
     throw new Error("找不到 Accoding 工作区。请先通过 TUI 初始化比赛或单题。");
   }
 
-  /**
-   * Immutable, content-addressed source snapshots ensure independent editor
-   * tasks never compile each other's in-progress generated C/C++ code.
-   */
-  private async freezeSource(resolved: ResolvedProblem, code: string): Promise<string> {
-    const ext = path.extname(resolved.source).toLowerCase();
-    const relative = path.join(".accoding", "snapshots", hash(code) + ext);
-    const location = await safePath(resolved.root, relative);
-    await fs.mkdir(path.dirname(location), { recursive: true });
-    try {
-      const existing = await fs.readFile(location, "utf8");
-      if (existing !== code)
-        throw new Error("源码快照的内容与哈希不匹配，已停止编译。");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      await atomicWrite(location, code);
-    }
-    return location;
-  }
-
   async prepare(resolved: ResolvedProblem): Promise<{
     source: string; code: string; originalHash: string
   }> {
@@ -508,6 +452,11 @@ export class StandaloneWorkflow {
       if (/^\s*#\s*include\s*"/m.test(original))
         throw new Error("C++ 第一版不支持自动展开自定义头文件，请先合并为单文件。");
     } else {
+      const shared = sharedInclude(resolved.root, resolved.source, original);
+      if (shared) {
+        const preset = await loadPreset(await sharedPresetPath(resolved.root, shared.key));
+        return { source: resolved.source, code: assembleC(original, preset, shared.include).code, originalHash };
+      }
       const presetFile = path.join(resolved.root, ".accoding", "scaffold",
         resolved.binding.bindingId, "manifest.json");
       if (!(await fileExists(presetFile))) {
@@ -539,11 +488,12 @@ export class StandaloneWorkflow {
         }
       }
     }
-    return { source: await this.freezeSource(resolved, code), code, originalHash };
+    return { source: resolved.source, code, originalHash };
   }
 
   async test(resolved: ResolvedProblem): Promise<boolean> {
     const account = (await this.state.load()).lastAccount || "offline";
+    this.tested.delete(resolved.source);
     const prepared = await this.prepare(resolved);
     await this.state.rememberProblem(resolved.root, resolved.binding.bindingId,
       account, { sourceFile: resolved.source });
@@ -552,9 +502,7 @@ export class StandaloneWorkflow {
       console.log("未找到官方样例，不能自动判定正确。");
       return false;
     }
-    const storage = path.join(resolved.root, ".accoding", "runs");
-    this.tested.delete(resolved.source);
-    const result = await judge(prepared.source, storage, cases,
+    const result = await judge(prepared.source, prepared.code, cases,
       await this.configuredToolchain(), undefined, path.dirname(resolved.source));
     try {
       if (result.compilation.exitCode !== 0 || result.compilation.reason) {
@@ -608,7 +556,8 @@ export class StandaloneWorkflow {
   }
 
   async submit(
-    resolved: ResolvedProblem, lang?: string, codeSnapshot?: string
+    resolved: ResolvedProblem, lang?: string, codeSnapshot?: string,
+    pickLanguage?: (choices: string[], fallback: boolean) => Promise<string | undefined>
   ): Promise<void> {
     const account = await this.account();
     if (!account) throw new Error("未登录");
@@ -625,17 +574,11 @@ export class StandaloneWorkflow {
       const current = hash(await fs.readFile(resolved.source, "utf8"));
       if (current !== tested.stamp)
         throw new Error("测试后源码发生修改，请重新测试。");
-      prepared = {
-        source: await this.freezeSource(resolved, codeSnapshot),
-        code: codeSnapshot
-      };
+      prepared = { source: resolved.source, code: codeSnapshot };
     }
-    if (hash(await fs.readFile(prepared.source, "utf8")) !== hash(prepared.code))
-      throw new Error("编译用源码快照发生变化，已取消提交。");
-    const storage = path.join(resolved.root, ".accoding", "runs");
-    const checked = await compile(prepared.source, storage,
-      await this.configuredToolchain(), undefined, false, path.dirname(resolved.source));
-    try {
+    const checked = codeSnapshot === undefined ? await compile(prepared.source, prepared.code,
+      await this.configuredToolchain(), undefined, false, path.dirname(resolved.source)) : undefined;
+    if (checked) try {
       if (checked.result.exitCode !== 0 || checked.result.reason)
         throw new Error("提交前编译失败，未上传：\n" + checked.result.stderr);
     } finally {
@@ -649,7 +592,13 @@ export class StandaloneWorkflow {
     try {
       const sent = await sendSubmission(this.session.client, problem.target,
         prepared.code, {
-          language: (current) => this.chooseLanguage(current, resolved.source, lang),
+          language: (current, fallback) => {
+            if (!pickLanguage || lang) return this.chooseLanguage(current, resolved.source, lang);
+            const choices = submissionLanguageChoices(current, resolved.source);
+            if (choices.length === 1) return Promise.resolve(choices[0]);
+            if (choices.length === 0) throw new Error("OJ 不支持此源文件的语言。");
+            return pickLanguage(choices, fallback);
+          },
           sending: async (target, language) => {
             const attempt = await store.begin(account, {
               target,
@@ -669,19 +618,19 @@ export class StandaloneWorkflow {
         console.log("注意：本次转为题库提交，不计入原比赛成绩。");
       await this.state.recordVerdict(resolved.root, submissionBinding, account, sent.result);
       console.log("提交 ID：" + sent.id + "，OJ 状态：" + sent.result);
-      if (isPending(sent)) await this.status(resolved.root, true);
+      if (isPending(sent)) await this.status(resolved.root, true, sent.target);
     } catch (error) {
       if (attemptId) await store.uncertain(account, attemptId);
       throw error;
     }
   }
 
-  async status(rootArg?: string, watch = false): Promise<void> {
+  async status(rootArg?: string, watch = false, target?: Target): Promise<void> {
     const account = await this.account();
     if (!account) throw new Error("未登录");
     const root = await this.workspaceRoot(rootArg);
     const store = new SubmissionStore(path.join(root, ".accoding", "submissions"));
-    const attempts = await store.list(account);
+    const attempts = await store.list(account, target);
     const uncertain = attempts.filter((entry) =>
       entry.state === "UnknownOutcome" || entry.state === "Sending");
     // Only the problemset adapter can verify the submitted source itself.
@@ -703,7 +652,7 @@ export class StandaloneWorkflow {
           (error instanceof Error ? error.message : String(error)));
       }
     }
-    const refreshed = await store.list(account);
+    const refreshed = await store.list(account, target);
     const pending = refreshed.filter((entry) =>
       entry.state === "Pending" && entry.submission && isPending(entry.submission));
     const unresolved = refreshed.filter((entry) =>

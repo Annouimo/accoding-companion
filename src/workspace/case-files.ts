@@ -161,64 +161,6 @@ export async function recoverCaseTransaction(root: string, id: string) {
   await fs.rm(await safePath(root, journalPath(id)));
 }
 
-/** Files are durable before the JSON revision/ACK becomes visible. */
-export async function commitCaseFiles(
-  root: string,
-  binding: Binding,
-  previous?: Binding,
-  previousJSON?: string,
-) {
-  const planned = contents(binding);
-  const old = previous ? contents(structuredClone(previous)) : {};
-  // Preserve deleted files for undo/recovery, including external edits: never erase them.
-  if (previous)
-    for (const c of previous.deletedCases ?? []) {
-      old[caseFile(previous, c.id, "input")] = c.input;
-      if (c.hasExpectedOutput)
-        old[caseFile(previous, c.id, "expected")] = c.expected;
-    }
-  const writes: Record<string, { before: string | null; content: string }> = {};
-  binding.fileHashes = {};
-  for (const [file, content] of Object.entries(planned)) {
-    const current = await readOptional(root, file);
-    const expected =
-      previous?.fileHashes?.[file] ??
-      (previous?.fileHashes && file in old && current !== undefined
-        ? hash(old[file])
-        : null);
-    if (digest(current) !== expected && current !== content)
-      throw new ConflictError(
-        `用例文件已在外部修改：${file}。请重新载入后核对，草稿未覆盖该文件。`,
-      );
-    // Initial migration may create files that did not exist in the old JSON format.
-    if (
-      current === undefined &&
-      previous?.fileHashes &&
-      file in previous.fileHashes
-    )
-      throw new ConflictError(
-        `用例文件已丢失：${file}。原始内容仍保存在元数据中，请先恢复文件。`,
-      );
-    binding.fileHashes[file] = hash(content);
-    if (current !== content)
-      writes[file] = { before: digest(current), content };
-  }
-  const currentJSON = await readOptional(root, metadataPath(binding.bindingId));
-  if (digest(currentJSON) !== digest(previousJSON))
-    throw new ConflictError("元数据在保存期间被外部修改，未覆盖原文件。");
-  const transaction = {
-    version: 1 as const,
-    beforeBindingHash: digest(previousJSON),
-    binding,
-    writes,
-  };
-  await atomicWrite(
-    await safePath(root, journalPath(binding.bindingId)),
-    JSON.stringify(transaction),
-  );
-  await recoverCaseTransaction(root, binding.bindingId);
-}
-
 /** Import edits made directly to .in/.out, bumping the version before any UI save. */
 export async function readExternalCaseEdits(root: string, binding: Binding) {
   if (!binding.fileHashes) return false;

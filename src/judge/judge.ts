@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import os from "node:os";
 import { hash, type TestCase, type Comparison } from "../model";
 import { runProcess, type ProcessResult } from "./process";
 export function compare(actual: string, expected: string, mode: Comparison) {
@@ -66,7 +66,7 @@ export interface JudgeResult {
 }
 export async function compile(
   source: string,
-  storage: string,
+  code: string,
   toolchain: Toolchain,
   signal?: AbortSignal,
   debug = false,
@@ -75,22 +75,10 @@ export async function compile(
   const ext = path.extname(source).toLowerCase();
   if (![".c", ".cpp", ".cc", ".cxx"].includes(ext))
     throw new Error("本地评测仅支持 C/C++ 文件。");
-  const directory = path.join(storage, randomUUID());
-  await fs.mkdir(directory, { recursive: true });
-  const code = await fs.readFile(source, "utf8");
-  const snapshot = path.join(directory, `main${ext}`);
-  await fs.writeFile(snapshot, code);
-  const program = path.join(
-    directory,
-    process.platform === "win32" ? "program.exe" : "program",
-  );
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-"));
+  const snapshot = path.join(directory, `submit${ext}`);
+  const program = path.join(directory, process.platform === "win32" ? "program.exe" : "program");
   const isC = ext === ".c";
-  // Compile immutable bytes while preserving relative quoted includes and original diagnostics.
-  const mapped = code.replace(
-    /^/,
-    "#line 1 " + JSON.stringify(source.replace(/\\/g, "/")) + "\n",
-  );
-  await fs.writeFile(snapshot, mapped);
   const flags = isC ? toolchain.cArgs : toolchain.cppArgs;
   const cwd = workingDirectory ?? path.dirname(source);
   const artifactArgument = (file: string) => {
@@ -115,24 +103,30 @@ export async function compile(
   // MinGW linkers may decode absolute Unicode paths through the system code page.
   // Relative artifact paths avoid repeating Unicode ancestors while retaining
   // the source directory as cwd for user-supplied include/library arguments.
-  const result = await runProcess(compiler, args, {
-    cwd,
-    timeoutMs: 30000,
-    outputLimit: toolchain.outputLimit,
-    signal,
-  });
-  return { result, program, directory, sourceHash: hash(code) };
+  try {
+    await fs.writeFile(snapshot, code);
+    const result = await runProcess(compiler, args, {
+      cwd,
+      timeoutMs: 30000,
+      outputLimit: toolchain.outputLimit,
+      signal,
+    });
+    return { result, program, directory, sourceHash: hash(code) };
+  } catch (error) {
+    await fs.rm(directory, { recursive: true, force: true });
+    throw error;
+  }
 }
 export async function judge(
   source: string,
-  storage: string,
+  code: string,
   cases: TestCase[],
   toolchain: Toolchain,
   signal?: AbortSignal,
   workingDirectory?: string,
 ): Promise<JudgeResult> {
   const snapshot = structuredClone(cases.filter((c) => c.enabled));
-  const built = await compile(source, storage, toolchain, signal, false, workingDirectory);
+  const built = await compile(source, code, toolchain, signal, false, workingDirectory);
   const output: JudgeResult = {
     runId: path.basename(built.directory),
     sourceHash: built.sourceHash,
@@ -142,42 +136,47 @@ export async function judge(
     directory: built.directory,
   };
   if (built.result.exitCode !== 0 || built.result.reason) return output;
-  for (const c of snapshot) {
-    const result = await runProcess(built.program, [], {
-      cwd: workingDirectory ?? path.dirname(source),
-      input: c.input,
-      timeoutMs: toolchain.timeoutMs,
-      outputLimit: toolchain.outputLimit,
-      signal,
-    });
-    const diff = c.hasExpectedOutput
-      ? compare(result.stdout, c.expected, c.comparison)
-      : undefined;
-    const status =
-      result.reason ??
-      (result.exitCode !== 0
-        ? "RE"
-        : !diff
-          ? "UNCHECKED"
-          : diff.equal
-            ? "PASS"
-            : "FAIL");
-    output.cases.push({
-      ...result,
-      id: c.id,
-      revision: c.revision,
-      contentHash: hash(
-        JSON.stringify([
-          c.input,
-          c.expected,
-          c.hasExpectedOutput,
-          c.comparison,
-        ]),
-      ),
-      status,
-      diff,
-    });
-    if (status === "CANCELLED") break;
+  try {
+    for (const c of snapshot) {
+      const result = await runProcess(built.program, [], {
+        cwd: workingDirectory ?? path.dirname(source),
+        input: c.input,
+        timeoutMs: toolchain.timeoutMs,
+        outputLimit: toolchain.outputLimit,
+        signal,
+      });
+      const diff = c.hasExpectedOutput
+        ? compare(result.stdout, c.expected, c.comparison)
+        : undefined;
+      const status =
+        result.reason ??
+        (result.exitCode !== 0
+          ? "RE"
+          : !diff
+            ? "UNCHECKED"
+            : diff.equal
+              ? "PASS"
+              : "FAIL");
+      output.cases.push({
+        ...result,
+        id: c.id,
+        revision: c.revision,
+        contentHash: hash(
+          JSON.stringify([
+            c.input,
+            c.expected,
+            c.hasExpectedOutput,
+            c.comparison,
+          ]),
+        ),
+        status,
+        diff,
+      });
+      if (status === "CANCELLED") break;
+    }
+  } catch (error) {
+    await fs.rm(built.directory, { recursive: true, force: true });
+    throw error;
   }
   return output;
 }

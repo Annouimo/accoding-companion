@@ -13,6 +13,7 @@ export interface ProblemActivity {
 export interface ApplicationState {
   schemaVersion: 1;
   lastWorkspace?: string;
+  tuiPage?: { root: string; group?: string; problem?: string };
   recentWorkspaces?: string[];
   lastProblem?: string;
   lastProblemsByWorkspace?: Record<string, string>;

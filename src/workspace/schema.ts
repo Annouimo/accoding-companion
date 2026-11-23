@@ -27,6 +27,8 @@ export const bindingSchema = z.object({
   sourceFile: z.string(),
   problemDirectory: z.string().optional(),
   selectedSubmissionLanguage: z.string().optional(),
+  initialSourceHash: z.string().optional(),
+  presetUndo: z.record(z.string()).optional(),
   fetchedAt: z.string(),
   revision: z.number().int().nonnegative(),
   cases: z.array(caseSchema),

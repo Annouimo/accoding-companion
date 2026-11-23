@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { atomicWrite } from "../workspace/fs";
+import { withWorkspaceLock } from "../workspace/lock";
+import { readContestRoster } from "../workspace/index";
 import type { Problem } from "../model";
 import { ask, confirm, interactive, select } from "./terminal";
 
@@ -108,6 +111,7 @@ export interface CourseSettings {
   kind: "course";
   language: "c" | "cpp";
   presetVersion?: string;
+  independentDirectory?: string;
 }
 
 /** One course workspace, one language, any number of contest subdirectories. */
@@ -172,64 +176,67 @@ export async function ensureContestDirectory(
   root: string, contestId: string, title: string
 ): Promise<string> {
   if (!/^\d+$/.test(contestId)) throw new Error("无效比赛 ID");
-  const metadata = path.join(root, ".accoding", "contests", contestId + ".location.json");
-  try {
-    const info = JSON.parse(await fs.readFile(metadata, "utf8")) as {
-      contestId: string; directory: string;
-    };
-    if (info.contestId !== contestId ||
-        !info.directory || path.basename(info.directory) !== info.directory)
-      throw new Error("已保存的比赛目录信息异常。");
-    if (!(await exists(path.join(root, info.directory))))
-      throw new Error("比赛文件夹已被移走，请先恢复后再同步。");
-    return info.directory;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  const base = readableName(title, "比赛-" + contestId);
-  for (const candidate of [base, base + "-" + contestId]) {
+  const base = path.join(root, ".accoding");
+  return withWorkspaceLock(path.join(base, "write.lock"), async () => {
+    const file = path.join(base, "contests", contestId + ".json");
+    const roster = await readContestRoster(root, contestId);
+    if (roster?.directory) return verifyCourseDirectory(root, roster.directory);
+    const oldFile = path.join(base, "contests", contestId + ".location.json");
+    let directory: string | undefined;
     try {
-      await fs.mkdir(path.join(root, candidate));
-      await fs.mkdir(path.dirname(metadata), { recursive: true });
-      await fs.writeFile(metadata, JSON.stringify({
-        schemaVersion: 1, contestId, directory: candidate, title
-      }, null, 2) + "\n", { flag: "wx", encoding: "utf8" });
-      return candidate;
+      const old = JSON.parse(await fs.readFile(oldFile, "utf8")) as { contestId: string; directory: string };
+      if (old.contestId !== contestId) throw new Error("已保存的比赛目录信息异常。");
+      directory = await verifyCourseDirectory(root, old.directory);
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (!directory) {
+      const name = readableName(title, "比赛-" + contestId);
+      directory = await createCourseDirectory(root, [name, name + "-" + contestId]);
+    }
+    const metadata = roster ?? { schemaVersion: 2, generatedBy: "betterAccoding",
+      id: contestId, title, fetchedAt: new Date().toISOString(), problems: [] };
+    await atomicWrite(file, JSON.stringify({ ...metadata, directory }, null, 2) + "\n");
+    return directory;
+  });
+}
+
+async function verifyCourseDirectory(root: string, directory: string): Promise<string> {
+  if (!directory || directory === "." || directory === ".." || path.basename(directory) !== directory)
+    throw new Error("已保存的课程目录信息异常。");
+  if (!(await exists(path.join(root, directory))))
+    throw new Error("文件夹已被移走，请先恢复后再同步：" + directory);
+  return directory;
+}
+
+async function createCourseDirectory(root: string, names: string[]): Promise<string> {
+  for (const name of names) {
+    try { await fs.mkdir(path.join(root, name)); return name; }
+    catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      // If another process registered the exact contest, use its folder.
-      if (await exists(metadata)) return ensureContestDirectory(root, contestId, title);
     }
   }
-  throw new Error("已有同名目录，请重命名其中一个目录后重试；不会覆盖用户文件夹。");
+  throw new Error("已有同名目录，请重命名后重试。");
 }
 
 /** Keep imported standalone exercises separate from a user's own similarly named folder. */
 export async function ensureIndependentDirectory(root: string): Promise<string> {
-  const marker = path.join(root, ".accoding", "independent-folder.json");
-  try {
-    const parsed = JSON.parse(await fs.readFile(marker, "utf8")) as {
-      kind?: string; directory?: string;
-    };
-    if (parsed.kind !== "independent" || !parsed.directory ||
-        path.basename(parsed.directory) !== parsed.directory)
-      throw new Error("独立题目录索引损坏，未修改任何文件。");
-    return parsed.directory;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  for (const candidate of ["独立题目", "独立题目-Accoding"]) {
+  const base = path.join(root, ".accoding");
+  return withWorkspaceLock(path.join(base, "write.lock"), async () => {
+    const config = await courseSettings(root);
+    if (config.independentDirectory)
+      return verifyCourseDirectory(root, config.independentDirectory);
+    let directory: string | undefined;
     try {
-      await fs.mkdir(path.join(root, candidate));
-      await fs.mkdir(path.dirname(marker), { recursive: true });
-      await fs.writeFile(marker, JSON.stringify({
-        schemaVersion: 1, kind: "independent", directory: candidate
-      }) + "\n", { flag: "wx" });
-      return candidate;
+      const parsed = JSON.parse(await fs.readFile(path.join(base, "independent-folder.json"), "utf8"));
+      if (parsed.kind !== "independent") throw new Error("独立题目录索引损坏。");
+      directory = await verifyCourseDirectory(root, parsed.directory);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (await exists(marker)) return ensureIndependentDirectory(root);
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-  }
-  throw new Error("独立题目目录已被占用，请先手动选择其他课程工作区。");
+    directory ??= await createCourseDirectory(root, ["独立题目", "独立题目-Accoding"]);
+    config.independentDirectory = directory;
+    await atomicWrite(path.join(base, "workspace.json"), JSON.stringify(config, null, 2) + "\n");
+    return directory;
+  });
 }
