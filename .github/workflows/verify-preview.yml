@@ -31,3 +31,10 @@ jobs:
           node dist/accoding.mjs --help
           node dist/accoding.mjs --version
           node tests/standalone/pty-smoke.mjs dist/accoding.mjs
+      - name: Save tested distributable for local end-to-end validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: accoding-companion-verified-bundle
+          path: dist/accoding.mjs
+          if-no-files-found: error
+          retention-days: 7
