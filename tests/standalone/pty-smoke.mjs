@@ -6,6 +6,7 @@ import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 
 if (process.platform !== "linux") {
@@ -39,7 +40,7 @@ async function scenario(name, run, prepare) {
   async function expect(needle, timeout = 9000) {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
-      const index = output.indexOf(needle, cursor);
+      const index = stripVTControlCharacters(output).indexOf(needle, cursor);
       if (index >= 0) { cursor = index + needle.length; return; }
       if (finished) throw Error(name + ": exited " + code + " before " + needle + "\n" + tail());
       await delay(40);
@@ -128,6 +129,7 @@ await scenario("sample table starts at the difference and scrolls within a 16-ro
   execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
     import fs from "node:fs/promises";
     import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
     import { WorkspaceStore } from "./src/workspace/store.ts";
     import { StateStore } from "./src/standalone/state.ts";
     import { courseSettings } from "./src/standalone/workspaces.ts";
