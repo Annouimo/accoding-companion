@@ -32,7 +32,8 @@
     "sanitize-html": "2.17.7",
     "tough-cookie": "5.1.2",
     "zod": "3.25.76",
-    "katex": "0.16.22"
+    "katex": "0.16.22",
+    "turndown": "7.2.4"
   },
   "devDependencies": {
     "@types/node": "22.20.4",
@@ -41,6 +42,7 @@
     "@types/katex": "0.16.8",
     "esbuild": "0.28.2",
     "typescript": "5.9.3",
-    "tsx": "4.20.6"
+    "tsx": "4.20.6",
+    "@types/turndown": "5.0.6"
   }
 }

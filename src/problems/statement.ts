@@ -1,6 +1,8 @@
 import MarkdownIt from "markdown-it";
 import sanitize from "sanitize-html";
 import * as cheerio from "cheerio";
+import TurndownService from "turndown";
+import type { Problem } from "../model";
 import type { Sample } from "../model";
 const markdown = new MarkdownIt({ html: true, linkify: false });
 // Keep TeX opaque to Markdown: \% must reach KaTeX as \%, not a comment.
@@ -226,4 +228,18 @@ export function extractSamples(
     })),
     warnings,
   };
+}
+
+/** A human-owned Markdown export. Create once; never overwrite edits on sync. */
+export function readableStatement(problem: Problem): string {
+  const body = problem.statement.format === "markdown"
+    ? problem.statement.content
+    : new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" })
+      .turndown(renderStatement("html",
+        problem.statement.content, problem.statement.baseUrl));
+  const title = problem.label ? problem.label + " · " + problem.title : problem.title;
+  const source = problem.statement.baseUrl;
+  return "# " + title + "\n\n" +
+    (source ? "来源：" + source + "\n\n" : "") +
+    body.trim() + "\n";
 }

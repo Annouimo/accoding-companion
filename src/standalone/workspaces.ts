@@ -64,39 +64,18 @@ async function exists(file: string): Promise<boolean> {
 
 export async function isFriendlyWorkspace(root: string): Promise<boolean> {
   try {
-    const marker = JSON.parse(await fs.readFile(path.join(root,
-      ".better-accoding", "friendly-layout.json"), "utf8")) as { version?: number };
-    return marker.version === 1;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw e;
+    const config = JSON.parse(await fs.readFile(
+      path.join(root, ".accoding", "workspace.json"), "utf8")) as CourseSettings;
+    return config.kind === "course" && config.schemaVersion === 1;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }
 
-/** Legacy workspaces keep the numeric layout; only fresh standalone ones get readable names. */
+/** Kept as a compatibility helper. New courses are initialized by courseSettings. */
 export async function initializeFriendlyLayout(root: string): Promise<boolean> {
-  if (await isFriendlyWorkspace(root)) return true;
-  if (await exists(path.join(root, "contests")) ||
-      await exists(path.join(root, "problems")))
-    return false;
-  const index = path.join(root, ".better-accoding", "workspace.json");
-  if (await exists(index)) {
-    const previous = JSON.parse(await fs.readFile(index, "utf8")) as {
-      bindings?: unknown[]
-    };
-    if (!Array.isArray(previous.bindings) || previous.bindings.length > 0)
-      return false;
-  }
-  const folder = path.join(root, ".better-accoding");
-  await fs.mkdir(folder, { recursive: true });
-  try {
-    await fs.writeFile(path.join(folder, "friendly-layout.json"),
-      JSON.stringify({ version: 1, kind: "standalone" }, null, 2) + "\n",
-      { encoding: "utf8", flag: "wx" });
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-  }
-  return true;
+  return isFriendlyWorkspace(root);
 }
 
 export async function readableProblemDirectory(
