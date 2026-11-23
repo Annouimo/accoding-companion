@@ -1,0 +1,33 @@
+name: Preview CI (no publishing)
+
+on:
+  push:
+    branches:
+      - feat/companion-foundation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Type-check and unit tests
+        run: |
+          npm run typecheck
+          npm test
+      - name: Build and verify distributable CLI
+        run: |
+          npm run build
+          node dist/accoding.mjs --help
+          node dist/accoding.mjs --version
+          node tests/standalone/pty-smoke.mjs dist/accoding.mjs
