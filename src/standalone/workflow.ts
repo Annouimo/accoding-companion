@@ -8,11 +8,11 @@ import { syncContest } from "../workspace/contest";
 import { WorkspaceStore } from "../workspace/store";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { defaultSourceFiles, cTemplate, cppTemplate } from "../workspace/sources";
-import { compile, judge, type Toolchain } from "../judge/judge";
+import { compile, judge, type CaseResult, type JudgeResult, type Toolchain } from "../judge/judge";
 import { sendSubmission } from "../submissions/send";
 import { SubmissionStore, isPending } from "../submissions/store";
 import { monitorSubmissions } from "../submissions/monitor";
-import { bindingId, hash, parseImport, type Binding, type Problem, type Target } from "../model";
+import { bindingId, hash, parseImport, type Binding, type Comparison, type Problem, type Target } from "../model";
 import { assembleC, loadPreset, quotedIncludes, PRESET_MANUAL, type LoadedPreset } from "./scaffold";
 import { readableStatement } from "../problems/statement";
 import { StateStore, isAccepted, activityAccepted } from "./state";
@@ -30,6 +30,16 @@ export interface ResolvedProblem {
   binding: Binding;
   source: string;
 }
+
+export type SampleCaseReport = CaseResult & {
+  name: string;
+  expected?: string;
+  comparison: Comparison;
+};
+
+export type SampleTestReport =
+  | { kind: "compile"; output: JudgeResult["compilation"] }
+  | { kind: "samples"; cases: SampleCaseReport[]; passed: number; total: number };
 
 export function toolchain(config: { c?: string; cpp?: string } = {}): Toolchain {
   return {
@@ -524,13 +534,13 @@ export class StandaloneWorkflow {
     return { source: resolved.source, code, originalHash };
   }
 
-  async test(resolved: ResolvedProblem): Promise<boolean> {
+  async test(resolved: ResolvedProblem, report?: (result: SampleTestReport) => void): Promise<boolean> {
     const account = (await this.state.load()).lastAccount || "offline";
     this.tested.delete(resolved.source);
     const prepared = await this.prepare(resolved);
     await this.state.rememberProblem(resolved.root, resolved.binding.bindingId,
       account, { sourceFile: resolved.source });
-    const cases = resolved.binding.cases;
+    const cases = resolved.binding.cases.filter(c => c.enabled);
     if (!cases.length) {
       console.log("未找到官方样例，不能自动判定正确。");
       return false;
@@ -539,13 +549,21 @@ export class StandaloneWorkflow {
       await this.configuredToolchain(), undefined, path.dirname(resolved.source));
     try {
       if (result.compilation.exitCode !== 0 || result.compilation.reason) {
+        report?.({ kind: "compile", output: result.compilation });
         console.error("编译失败：\n" + result.compilation.stderr);
         return false;
       }
-      for (let i = 0; i < result.cases.length; i++) {
-        const entry = result.cases[i];
-        const original = cases.find((c) => c.id === entry.id);
-        console.log((i + 1) + ". " + (original?.name || "样例") + " : " + entry.status);
+      const originals = new Map(cases.map(c => [c.id, c]));
+      const samples = result.cases.map(entry => {
+        const original = originals.get(entry.id)!;
+        return { ...entry, name: original.name || "样例",
+          expected: original.hasExpectedOutput ? original.expected : undefined,
+          comparison: original.comparison };
+      });
+      const passed = samples.filter(entry => entry.status === "PASS").length;
+      report?.({ kind: "samples", cases: samples, passed, total: cases.length });
+      for (const [i, entry] of samples.entries()) {
+        console.log((i + 1) + ". " + entry.name + " : " + entry.status);
         if (entry.status === "FAIL") {
           console.log("  预期：" + (entry.diff?.expected ?? "(无)"));
           console.log("  实际：" + (entry.diff?.actual ?? "(无)"));
@@ -553,9 +571,7 @@ export class StandaloneWorkflow {
           console.log("  stderr：" + entry.stderr.slice(0, 500));
         }
       }
-      const allPass = result.cases.length > 0 &&
-        result.cases.length === cases.filter((c) => c.enabled).length &&
-        result.cases.every((c) => c.status === "PASS");
+      const allPass = passed === cases.length;
       console.log(allPass ? "全部本地样例通过。" : "有用例未通过。");
       if (allPass) this.tested.set(resolved.source, {
         code: prepared.code, stamp: prepared.originalHash
