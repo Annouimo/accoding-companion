@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+declare const __ACCODING_VERSION__: string;
 import path from "node:path";
 import { configDirectory } from "./state";
+import { startFullScreenTui } from "./tui";
 import { spawn } from "node:child_process";
 import { StandaloneWorkflow, type ResolvedProblem } from "./workflow";
 import { ask, confirm, interactive, select } from "./terminal";
@@ -272,6 +274,9 @@ async function showPaths(app: StandaloneWorkflow): Promise<void> {
 
 async function run(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args.includes("--version") || args.includes("-V")) {
+    console.log(__ACCODING_VERSION__); return;
+  }
   if (args.includes("--help") || args.includes("-h")) { usage(); return; }
   const app = new StandaloneWorkflow();
   try {
@@ -282,7 +287,13 @@ async function run(): Promise<void> {
     if (language && !["c", "cpp"].includes(language))
       throw new Error("--workspace-lang 只支持 c 或 cpp。");
     const command = args[0];
-    if (!command) { await tui(app); return; }
+    if (!command) {
+      if (interactive() && (process.stdout.columns || 80) >= 60 &&
+          process.env.ACCODING_CLASSIC_TUI !== "1")
+        await startFullScreenTui(app);
+      else await tui(app);
+      return;
+    }
     if (command === "login") { await app.login(); return; }
     if (command === "logout") { await app.logout(); return; }
     if (command === "contest" && args[1] === "init" && args[2]) {

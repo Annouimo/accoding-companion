@@ -23,8 +23,8 @@ export interface ApplicationState {
 
 export function configDirectory(): string {
   return process.platform === "win32"
-    ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "accoding-tui")
-    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "accoding-tui");
+    ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "accoding-companion")
+    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "accoding-companion");
 }
 export const emptyState = (): ApplicationState => ({ schemaVersion: 1, problems: {} });
 
@@ -142,4 +142,15 @@ export function isAccepted(verdict?: string): boolean {
 
 export function activityAccepted(activity: ProblemActivity): boolean {
   return Boolean(activity.accepted || isAccepted(activity.verdict));
+}
+
+/** User-owned package cache, kept outside coursework and npm's global prefix. */
+export function dataDirectory(): string {
+  if (process.platform === "win32")
+    return path.join(process.env.LOCALAPPDATA ||
+      path.join(os.homedir(), "AppData", "Local"), "Accoding Companion");
+  if (process.platform === "darwin")
+    return path.join(os.homedir(), "Library", "Application Support", "Accoding Companion");
+  return path.join(process.env.XDG_DATA_HOME ||
+    path.join(os.homedir(), ".local", "share"), "accoding-companion");
 }

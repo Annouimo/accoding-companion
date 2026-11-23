@@ -25,15 +25,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/companion-smoke
-          cp dist/accoding.cjs /tmp/companion-smoke/accoding.cjs
-          (cd /tmp/companion-smoke && node ./accoding.cjs --help | grep -q Accoding)
+          cp dist/accoding.mjs /tmp/companion-smoke/accoding.mjs
+          (cd /tmp/companion-smoke && node ./accoding.mjs --help | grep -q Accoding)
+      - name: Installer script syntax
+        run: bash -n install.sh
       - name: npm package dry run
         run: npm pack --dry-run
       - uses: actions/upload-artifact@v4
         with:
           name: companion-p1-node-preview
           path: |
-            dist/accoding.cjs
+            dist/accoding.mjs
             package-lock.json
           retention-days: 10
           if-no-files-found: error
