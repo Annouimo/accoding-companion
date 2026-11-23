@@ -191,6 +191,14 @@ function maskC(source: string, literals: boolean): string {
   return out;
 }
 
+export function quotedIncludes(source: string): Array<{ name: string; start: number; end: number }> {
+  return [...maskC(source, false).matchAll(/(^[ \t]*#[ \t]*include[ \t]*")([^"\r\n]+)"/gm)]
+    .map((match) => {
+      const start = match.index + match[1].length;
+      return { name: match[2], start, end: start + match[2].length };
+    });
+}
+
 function lines(text: string): string[] {
   return text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 }

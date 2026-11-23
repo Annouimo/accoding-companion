@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { dataDirectory } from "./state";
-import { loadPreset, renderHeader, assembleC, type LoadedPreset } from "./scaffold";
+import { loadPreset, renderHeader, assembleC, quotedIncludes, type LoadedPreset } from "./scaffold";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { withWorkspaceLock } from "../workspace/lock";
 import { compile, type Toolchain } from "../judge/judge";
@@ -156,18 +156,19 @@ export function presetInclude(source: string, directory: string): string {
 
 export function sharedInclude(root: string, source: string, code: string) {
   const base = path.join(root, ".accoding", "presets");
-  for (const match of code.matchAll(/^[ \t]*#[ \t]*include[ \t]*"([^"\r\n]+)"/gm)) {
-    const file = path.resolve(path.dirname(source), match[1]);
+  for (const { name } of quotedIncludes(code)) {
+    const file = path.resolve(path.dirname(source), name);
     const [key, header, extra] = path.relative(base, file).split(path.sep);
     if (SNAPSHOT_KEY.test(key) && header === "expanded.h" && !extra)
-      return { key, include: match[1] };
+      return { key, include: name };
   }
 }
 
 function replaceInclude(code: string, before: string, after: string): string {
-  return code.replace(/(^[ \t]*#[ \t]*include[ \t]*")([^"\r\n]+)(")/gm,
-    (line, start: string, include: string, end: string) =>
-      include === before ? start + after + end : line);
+  const includes = quotedIncludes(code).filter((include) => include.name === before);
+  if (includes.length !== 1) throw new Error("应且仅应引用一次脚手架头文件。");
+  const { start, end } = includes[0];
+  return code.slice(0, start) + after + code.slice(end);
 }
 
 async function previousPreset(

@@ -56,7 +56,7 @@ test("installed npm C99 data and per-question update preserve original code", as
     const store=new WorkspaceStore(root);
     const binding=await store.import(problem,"A-Test");
     const source=path.join(root,binding.sourceFile);
-    const sourceCode='#include "exam.h"\n#include <stdio.h>\n'+
+    const sourceCode='#include "exam.h"\n#include <stdio.h>\n/* example\n#include "exam.h"\n*/\n'+
       'int main(void) {printf("%llu\\n",exam_lcm_u64(12,18));return 0;}\n';
     await fs.writeFile(source,sourceCode);
     const example=path.resolve("scaffold/presets/example-c99");

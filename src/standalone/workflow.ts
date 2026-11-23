@@ -13,7 +13,7 @@ import { sendSubmission } from "../submissions/send";
 import { SubmissionStore, isPending } from "../submissions/store";
 import { monitorSubmissions } from "../submissions/monitor";
 import { bindingId, hash, parseImport, type Binding, type Problem, type Target } from "../model";
-import { assembleC, loadPreset, type LoadedPreset } from "./scaffold";
+import { assembleC, loadPreset, quotedIncludes, type LoadedPreset } from "./scaffold";
 import { readableStatement } from "../problems/statement";
 import { StateStore, isAccepted, activityAccepted } from "./state";
 import { installedPresets, presetForVersion, setCoursePresetVersion,
@@ -459,16 +459,14 @@ export class StandaloneWorkflow {
       }
       const presetFile = path.join(resolved.root, ".accoding", "scaffold",
         resolved.binding.bindingId, "manifest.json");
+      const includes = quotedIncludes(original);
       if (!(await fileExists(presetFile))) {
-        if (/^\s*#\s*include\s*"/m.test(original))
+        if (includes.length)
           throw new Error("使用了本地头文件，但未找到可展开的脚手架配置快照。");
       } else {
         const preset = await loadPreset(presetFile);
-        const includes = original.split(/\r?\n/).some((line) =>
-          new RegExp('^\\s*#\\s*include\\s*"' +
-            preset.manifest.headerFile.replace(/\./g, "\\.") + '"').test(line));
-        if (!includes) {
-          if (/^\s*#\s*include\s*"/m.test(original))
+        if (!includes.some((include) => include.name === preset.manifest.headerFile)) {
+          if (includes.length)
             throw new Error("检测到其他本地头文件；C99 单文件模式只支持配置中的头文件。");
         } else {
           const headerPath = path.join(path.dirname(resolved.source),
