@@ -1,0 +1,62 @@
+{
+  "name": "@annouimo/accoding-companion",
+  "version": "0.2.0",
+  "description": "Non-official Accoding companion for C/C++ coursework",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "bin": {
+    "accoding": "./dist/accoding.mjs"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "files": [
+    "dist/accoding.mjs",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "install.sh",
+    "install.ps1",
+    "launch.command",
+    "launch.cmd",
+    "launch.ps1"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/standalone/*.test.ts tests/standalone/*.test.mjs",
+    "pack:dry": "npm pack --dry-run",
+    "prepack": "npm run build",
+    "test:launcher": "node tests/standalone/launcher-smoke.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "cheerio": "1.0.0",
+    "markdown-it": "14.3.2",
+    "sanitize-html": "2.17.7",
+    "tough-cookie": "5.1.2",
+    "zod": "3.25.76",
+    "katex": "0.16.22",
+    "turndown": "7.2.4",
+    "ink": "7.1.1",
+    "react": "19.2.6",
+    "react-devtools-core": "6.1.2",
+    "@types/node": "22.20.4",
+    "@types/markdown-it": "14.2.0",
+    "@types/sanitize-html": "2.16.1",
+    "@types/katex": "0.16.8",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "tsx": "4.20.6",
+    "@types/turndown": "5.0.6",
+    "@types/react": "^19.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Annouimo/accoding-companion.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
