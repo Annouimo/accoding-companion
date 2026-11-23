@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { WorkspaceStore } from "../../src/workspace/store";
 import { StandaloneWorkflow } from "../../src/standalone/workflow";
 import { StateStore, isAccepted, activityAccepted } from "../../src/standalone/state";
@@ -78,6 +79,12 @@ test("standalone C and C++ judge share the same persisted official samples", asy
       'int main(void) { FILE *f = fopen("local-input.txt", "r");' +
       ' if (!f) return 2; fclose(f);' +
       ' printf("%llu\\n", exam_lcm_u64(12, 18)); return 0; }\n');
+    // The tiny visible wrapper must also work with ordinary IDE/GCC compilation,
+    // independently of the submission assembler.
+    const executable = path.join(folder, "local-program");
+    execFileSync("cc", ["-std=c99", source, "-lm", "-o", executable], { cwd:folder });
+    assert.equal(execFileSync(executable, { cwd:folder, encoding:"utf8" }), "36\\n");
+
     const resolved = await app.resolve(source);
     assert.equal(await app.test(resolved), true);
     assert.ok(app.testedCode(source)?.includes("static unsigned long long exam_lcm_u64"));
