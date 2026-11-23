@@ -2,7 +2,7 @@
 
 独立的、**非官方** Accoding 命令行／终端编程助手。用于导入课程比赛、管理 C99/C++17 源码、本地评测及提交到 OJ。此项目与 Accoding、北航没有官方隶属关系。
 
-> **开发预览版。** 代码尚未完成 Mac/Windows 实机验收；两个 npm 包目前均标记为 `private`，**不能通过 npm 安装正式版本**。请勿将预览版视为考试或课程官方工具。
+> **开发预览版。** 两个包已发布到 npm 的 `next` 预览通道，但仍未完成 Mac/Windows 全面实机验收；暂无 `latest` 稳定版。源码中的 `private: true` 仅用于阻止误发布，手动 GitHub Actions 预览发布会在打包时移除该标记。请勿将预览版视为考试或课程官方工具。
 
 ## 产品设计
 
@@ -22,6 +22,7 @@ npm install
 npm run typecheck
 npm test
 npm run build
+node tests/standalone/pty-smoke.mjs dist/accoding.mjs  # Linux 伪终端回归测试
 node dist/accoding.mjs --help
 node dist/accoding.mjs --version
 node dist/accoding.mjs
@@ -46,16 +47,33 @@ node dist/accoding.mjs submit "/path/to/C语言课程/某次作业/A-题目/main
 node dist/accoding.mjs status --watch
 ```
 
-## 安装与更新（正式发布后）
+## npm 预览版安装
 
-未来提供 [install.sh](install.sh)（macOS/Linux）和 [install.ps1](install.ps1)（Windows）。用户主动运行安装器时：
+当前安装器仍在实机验收，建议先手动安装两个独立 npm 包。主程序安装：
+
+```sh
+npm install -g @annouimo/accoding-companion@next
+accoding --version
+```
+
+C Exam Kit 是纯数据包，**不要只进行全局 npm 安装**，否则主程序无法自动发现。macOS 示例（单独安装到版本化目录）：
+
+```sh
+VERSION="$(npm view @annouimo/c-exam-kit-preset@next version)"
+DIR="$HOME/Library/Application Support/Accoding Companion/presets/$VERSION"
+npm install --prefix "$DIR" --no-save --ignore-scripts "@annouimo/c-exam-kit-preset@$VERSION"
+```
+
+进入 Accoding Companion 的「设置 → 课程工作区」创建 C99 课程；全新课程默认选择本机已安装的最新数据包。已有课程可在「设置 → 脚手架版本」中选择默认版本。C++17 不需要这个 C99 数据包。
+
+预备中的 [install.sh](install.sh)（macOS/Linux）和 [install.ps1](install.ps1)（Windows）计划在用户主动运行时：
 
 1. 检测 Node.js/npm，缺失时征求同意并提供官方安装途径；
 2. 查询 npm 上主程序和 C Exam Kit 数据包的可用版本；
 3. 选择一起更新，或使用 `--software-only`、`--preset-only`；
 4. 下载安装，验证后保留已有课程数据和题目快照。
 
-主程序包：`@annouimo/accoding-companion`；C99 数据包：`@annouimo/c-exam-kit-preset`。两者目前都**未正式发布**；直接运行安装器查询会得到包不存在的提示。
+主程序包：`@annouimo/accoding-companion`；C99 数据包：`@annouimo/c-exam-kit-preset`。两个包目前均有公开的 `next` 预览版；没有 `latest` 稳定版。安装器仍需后续单独验收与修复。
 
 脚手架下载后可以在 TUI 中设为课程默认版本，并选择更新 **所有空题目／所有未 AC 题目／所有题目／自选题目**。每题保留备份及单独撤销；不会重写 `main.c` 和 `题目.md`。
 
