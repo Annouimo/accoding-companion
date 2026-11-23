@@ -106,6 +106,7 @@ export interface CourseSettings {
   schemaVersion: 1;
   kind: "course";
   language: "c" | "cpp";
+  presetVersion?: string;
 }
 
 /** One course workspace, one language, any number of contest subdirectories. */
