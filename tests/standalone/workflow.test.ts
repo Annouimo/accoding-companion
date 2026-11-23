@@ -66,9 +66,9 @@ test("standalone C and C++ judge share the same persisted official samples", asy
     const expandedHeader = path.join(config, "expanded.h");
     await fs.writeFile(expandedHeader, renderHeader(preset));
     const relativeHeader = path.relative(folder, expandedHeader).split(path.sep).join("/");
-    const wrapper = "#ifndef ACCODING_EXAM_WRAPPER_H\\n" +
-      "#define ACCODING_EXAM_WRAPPER_H\\n" +
-      '#include "' + relativeHeader + '"\\n#endif\\n';
+    const wrapper = "#ifndef ACCODING_EXAM_WRAPPER_H\n" +
+      "#define ACCODING_EXAM_WRAPPER_H\n" +
+      '#include "' + relativeHeader + '"\n#endif\n';
     await fs.writeFile(path.join(folder, "exam.h"), wrapper);
     const source = path.join(folder, "main.c");
     // The generated compile source is nested under .accoding/generated, but
