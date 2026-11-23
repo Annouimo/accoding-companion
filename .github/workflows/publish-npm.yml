@@ -34,9 +34,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          # Source remains in the approved development branch until accepted.
-          # DRY_RUN on main checks the exact same source as PUBLISH_NEXT.
-          ref: feat/companion-foundation
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -46,19 +43,7 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           set -euo pipefail
-          # GitHub's workflow_dispatch defaults to main, even though the
-          # preview's source lives on the named development branch.
-          if [[ "$GITHUB_REF" != "refs/heads/main" &&
-                "$GITHUB_REF" != "refs/heads/feat/companion-foundation" ]]; then
-            echo "::error::Run this workflow on main (DRY_RUN) or feat/companion-foundation." >&2
-            exit 1
-          fi
-          if [[ "${{ inputs.mode }}" == "PUBLISH_NEXT" &&
-                "$GITHUB_REF" != "refs/heads/feat/companion-foundation" ]]; then
-            echo "::error::To publish a preview, select feat/companion-foundation in the Run workflow branch dropdown." >&2
-            exit 1
-          fi
-          echo "Checking source from feat/companion-foundation; workflow was triggered on $GITHUB_REF."
+          test "$GITHUB_REF" = "refs/heads/feat/companion-foundation"
           node - <<'NODE'
           const fs=require("node:fs");
           const file="package.json";
