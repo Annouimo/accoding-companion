@@ -7,6 +7,7 @@ import type { StandaloneWorkflow, ResolvedProblem } from "./workflow";
 import { activityAccepted } from "./state";
 import { ask } from "./terminal";
 import { courseSettings } from "./workspaces";
+import { chooseUpdateTargets, type UpdateMode } from "./preset-manager";
 
 interface Item { id: string; label: string; note?: string }
 interface MenuProps {
@@ -244,7 +245,7 @@ export async function startFullScreenTui(app: StandaloneWorkflow): Promise<void>
     if (action === "settings") {
       const selected = await choose("设置", [base, "设置"], [
         { id: "workspace", label: "选择 / 新建课程工作区" },
-        { id: "preset", label: "指定本地脚手架配置" },
+        { id: "preset", label: "脚手架版本和题目更新（本地）" },
         { id: "sync", label: "同步远程题目" },
         { id: "status", label: "查询 OJ 提交状态" },
         { id: "login", label: "登录 / 切换账号" },
@@ -256,9 +257,77 @@ export async function startFullScreenTui(app: StandaloneWorkflow): Promise<void>
         const raw = await ask("课程文件夹（可拖入路径）", root);
         if (raw) result = await transcript(() => app.courseRoot(raw));
       } else if (selected === "preset") {
-        const raw = await ask("本地脚手架目录 / manifest.json（default 恢复内置）",
-          (await app.state.load()).presetPath || "default");
-        result = await transcript(() => app.setPreset(raw === "default" ? undefined : raw));
+        if (!root) {
+          result = { output: "请先创建课程工作区。" };
+        } else {
+          const versions = await app.installedPresetVersions();
+          if (!versions.length) {
+            result = { output: "尚无通过安装器下载的脚手架版本。\n请运行 install.sh 或 install.ps1 下载。" };
+          } else {
+            const version = await choose("选择本机脚手架版本", [base,"脚手架"],
+              versions.map(v => ({id:v.version,label:"C Exam Kit " + v.version})));
+            if (version) {
+              const act = await choose("版本 "+version, [base,"脚手架",version], [
+                { id:"default", label:"设为课程工作区默认版本（用于新题目）" },
+                { id:"empty", label:"更新所有空题目（推荐）" },
+                { id:"unaccepted", label:"更新所有未 AC 题目" },
+                { id:"all", label:"更新所有题目" },
+                { id:"selected", label:"自选更新题目" },
+                { id:"undo", label:"撤销某道题的上一次脚手架更新" }
+              ]);
+              if (act === "default") {
+                result = await transcript(() => app.setWorkspacePreset(version, root));
+              } else if (act === "undo") {
+                const chosen = await choose("选择要回退的题目", [base,"脚手架","回退"],
+                  all.filter(p=>p.source.endsWith(".c")).map(p=>({
+                    id:p.binding.bindingId,
+                    label:p.binding.problem.label + " · " + p.binding.problem.title
+                  })));
+                if (chosen) result = await transcript(() => app.undoQuestionPreset(chosen,root));
+              } else if (act && ["empty","unaccepted","all","selected"].includes(act)) {
+                const mode = act as UpdateMode;
+                let ids: string[] = [];
+                if (mode === "selected") {
+                  const checked = new Set<string>();
+                  const candidates = all.filter(p=>p.source.endsWith(".c"));
+                  for (;;) {
+                    const item = await choose("空格选择的等效方式：Enter 勾选/取消",
+                      [base,"脚手架","自选题目"],[
+                      {id:"done",label:"确认选择 ("+checked.size+")"},
+                      ...candidates.map(p=>({
+                        id:p.binding.bindingId,
+                        label:(checked.has(p.binding.bindingId)?"[x] ":"[ ] ")+
+                          p.binding.problem.label+" · "+p.binding.problem.title
+                      }))
+                    ]);
+                    if (!item || item==="done") break;
+                    if (checked.has(item)) checked.delete(item); else checked.add(item);
+                  }
+                  ids=[...checked];
+                }
+                const state = await app.state.load();
+                const user = app.session.user?.id || state.lastAccount || "offline";
+                const preview = await chooseUpdateTargets(root,
+                  all.map(x=>x.binding),mode,
+                  b=>app.state.getActivity(state,root,b.bindingId,user),ids);
+                const listed = preview.targets.slice(0,15)
+                  .map(b=>b.problem.label+" · "+b.problem.title).join("\n");
+                const agree = await choose("脚手架更新预览", [base,"脚手架","预览"], [
+                  {id:"yes",label:"确认更新 "+preview.targets.length+" 道题"},
+                  {id:"no",label:"取消"}
+                ], listed+"\n状态未知、未纳入："+
+                  preview.excludedUnknown+" 道。将保留源码与旧组件备份。");
+                if (agree==="yes" && preview.targets.length) {
+                  result=await transcript(async()=>{
+                    const r=await app.updateQuestionPresets(version,mode,ids,root);
+                    console.log("更新成功："+r.updated+" 道；状态未知："+r.excludedUnknown);
+                    for(const err of r.errors) console.log("跳过："+err);
+                  });
+                }
+              }
+            }
+          }
+        }
       } else if (selected === "sync") result = await transcript(() => app.sync());
       else if (selected === "status") result = await transcript(() => app.status(root, true));
       else if (selected === "login") result = await transcript(() => app.login());
