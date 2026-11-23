@@ -22,7 +22,8 @@ export async function migrateLegacyWorkspace(
   sourceRoot: string, targetRoot: string, language: "c" | "cpp"
 ): Promise<MigrationReport> {
   const source = path.resolve(sourceRoot), target = path.resolve(targetRoot);
-  if (source === target || target.startsWith(source + path.sep))
+  if (source === target || target.startsWith(source + path.sep) ||
+      source.startsWith(target + path.sep))
     throw new Error("新课程工作区必须位于旧工作区之外。");
   const bindingsDir = path.join(source, ".better-accoding", "bindings");
   const stat = await fs.stat(bindingsDir);
@@ -47,10 +48,10 @@ export async function migrateLegacyWorkspace(
       if ((language === "c" && !previous.sourceFile.endsWith(".c")) ||
           (language === "cpp" && !previous.sourceFile.endsWith(".cpp")))
         throw new Error("源文件语言与新工作区不同，请迁入对应语言的课程工作区。");
-      const legacyCode = await fs.readFile(
-        path.resolve(source, previous.sourceFile), "utf8");
-      if (!path.resolve(source, previous.sourceFile).startsWith(source + path.sep))
+      const oldSourcePath = path.resolve(source, previous.sourceFile);
+      if (!oldSourcePath.startsWith(source + path.sep))
         throw new Error("旧源码路径超出工作区。");
+      const legacyCode = await fs.readFile(oldSourcePath, "utf8");
       let parent: string | undefined;
       if (previous.problem.target.kind === "contest") {
         const contestId = previous.problem.target.contestId;
