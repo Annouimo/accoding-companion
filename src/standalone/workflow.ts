@@ -145,15 +145,17 @@ export class StandaloneWorkflow {
   async courseRoot(explicit?: string, language?: "c" | "cpp"): Promise<string> {
     const saved = (await this.state.load()).lastWorkspace;
     const selected = await selectCourseDirectory(saved, explicit);
-    const root = await this.workspaceRoot(selected);
+    const root = droppedPath(selected);
+    await fs.mkdir(root, { recursive: true });
     const wasConfigured = await fileExists(path.join(root, ".accoding", "workspace.json"));
     const config = await courseSettings(root, language);
     // A newly created C99 workspace inherits the newest already installed
     // preset. Never silently change the preset of an existing course.
-    if (!wasConfigured && config.language === "c") {
+    if ((!wasConfigured || !config.presetVersion) && config.language === "c") {
       const versions = await installedPresets();
       if (versions.length) await setCoursePresetVersion(root, versions[0].version);
     }
+    await this.state.rememberWorkspace(root);
     return root;
   }
 
@@ -264,7 +266,7 @@ export class StandaloneWorkflow {
     const global = (await this.state.load()).presetPath;
     if (global) return loadPreset(global);
     // No silent fallback to the old GCD/LCM demonstration header.
-    throw new Error("此 C99 课程尚未配置正式 C Exam Kit。请先运行 npm install -g @annouimo/c-exam-kit-preset@next，再在“设置 → 脚手架版本”中设为课程默认版本。");
+    throw new Error("此 C99 课程尚未配置正式 C Exam Kit。请先运行 npm install -g @annouimo/c-exam-kit-preset@next，再在“设置 → 更新课程资源”中设为课程默认版本。");
   }
 
   async setPreset(file?: string): Promise<void> {
@@ -286,32 +288,40 @@ export class StandaloneWorkflow {
     await setCoursePresetVersion(root, version);
   }
 
-  async updateQuestionPresets(
-    version: string, mode: UpdateMode, selected: string[] = [], rootArg?: string
-  ): Promise<{ updated: number; excludedUnknown: number; errors: string[] }> {
-    const root = await this.workspaceRoot(rootArg);
+  async previewPresetUpdate(version: string, mode: UpdateMode, selected: string[] = [], rootArg?: string) {
+    const configured = rootArg ?? (await this.state.load()).lastWorkspace;
+    if (!configured) throw new Error("还没有当前课程工作区。");
+    const root = droppedPath(configured);
+    if (!(await fileExists(path.join(root, ".accoding", "workspace.json"))))
+      throw new Error("课程尚未配置：" + root);
+    const course = await courseSettings(root);
+    if (course.language !== "c") throw new Error("此课程使用 C++17：" + root);
     const found = await presetForVersion(version);
     const bindings = await new WorkspaceStore(root).list();
-    const state = await this.state.load();
-    const account = this.session.user?.id ?? state.lastAccount ?? "offline";
-    const {targets, excludedUnknown} = await chooseUpdateTargets(
-      root, bindings, mode,
-      (b) => this.state.getActivity(state, root, b.bindingId, account), selected
-    );
+    const plan = await chooseUpdateTargets(root, bindings, mode, selected, version);
+    return { root, found, ...plan };
+  }
+
+  async updateQuestionPresets(
+    version: string, mode: UpdateMode, selected: string[] = [], rootArg?: string, setDefault = false
+  ) {
+    const {root, found, targets, retained} = await this.previewPresetUpdate(version, mode, selected, rootArg);
+    if (setDefault) await setCoursePresetVersion(root, version);
     const compiler = await this.configuredToolchain();
     let updated = 0;
     const errors: string[] = [];
     for (const b of targets) {
       try {
-        await applyPresetVersion(root, b, found, compiler);
-        this.tested.delete(sourceFor(b, root));
-        updated++;
+        if (await applyPresetVersion(root, b, found, compiler, mode === "empty")) {
+          this.tested.delete(sourceFor(b, root));
+          updated++;
+        }
       } catch (error) {
         errors.push(b.problem.label + " " + b.problem.title + ": " +
           (error instanceof Error ? error.message : String(error)));
       }
     }
-    return { updated, excludedUnknown, errors };
+    return { updated, retained, errors };
   }
 
   async undoQuestionPreset(bindingId: string, rootArg?: string): Promise<void> {

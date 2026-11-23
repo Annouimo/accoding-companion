@@ -8,9 +8,10 @@ import { courseSettings } from "../../src/standalone/workspaces";
 import { migrateLegacyWorkspace } from "../../src/standalone/migrate";
 import { execFileSync } from "node:child_process";
 import { installedPresets, setCoursePresetVersion, applyPresetVersion, undoPresetUpdate,
-  chooseUpdateTargets } from "../../src/standalone/preset-manager";
+  chooseUpdateTargets, presetInclude, saveSharedPreset } from "../../src/standalone/preset-manager";
 import { loadPreset, renderHeader } from "../../src/standalone/scaffold";
 import { StandaloneWorkflow, toolchain } from "../../src/standalone/workflow";
+import { cTemplate } from "../../src/workspace/sources";
 import { hash, type Problem } from "../../src/model";
 
 const problem: Problem = {
@@ -95,7 +96,7 @@ test("installed npm C99 data and per-question update preserve original code", as
     const marker=path.join(root,".accoding","initial-hashes",binding.bindingId+".json");
     await fs.mkdir(path.dirname(marker),{recursive:true});
     await fs.writeFile(marker,JSON.stringify({sourceHash:hash(sourceCode)}));
-    const blank=await chooseUpdateTargets(root,[binding],"empty",()=>({}));
+    const blank=await chooseUpdateTargets(root,[binding],"empty");
     assert.equal(blank.targets.length,1);
     await applyPresetVersion(root, binding, installed[0], toolchain());
     const updated = await fs.readFile(source, "utf8");
@@ -151,5 +152,34 @@ test("missing C99 package gives an actionable error while C++17 needs no preset"
     if (previous === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = previous;
     await fs.rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("batch preset update uses source history and can recognize an unchanged generated template", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-update-"));
+  try {
+    await courseSettings(root, "c");
+    const store = new WorkspaceStore(root);
+    const preset = await loadPreset(path.resolve("scaffold/presets/example-c99"));
+    const snapshot = await saveSharedPreset(root, preset, "0.6.5");
+    const bindings = [];
+    for (const [index, suffix] of ["", "// 已写代码\n"].entries()) {
+      const binding = await store.import({
+        ...problem, target: { kind: "problemset", problemId: String(index + 100) }
+      }, "题目-" + index);
+      const source = path.join(root, binding.sourceFile);
+      await fs.writeFile(source,
+        '#include "' + presetInclude(source, snapshot.directory) + '"\n' + cTemplate + suffix);
+      bindings.push(binding);
+    }
+    const preview = await chooseUpdateTargets(root, bindings, "empty", [], "0.6.6");
+    assert.deepEqual(preview.targets.map(b => b.bindingId), [bindings[0].bindingId]);
+    assert.equal(preview.retained, 1);
+    assert.deepEqual((await chooseUpdateTargets(root, bindings, "empty", [], "0.6.5")).targets, []);
+    await assert.rejects(applyPresetVersion(root, bindings[1], { version: "0.6.6", preset },
+      toolchain(), true), /源码已改动/);
+    assert.match(await fs.readFile(path.join(root, bindings[1].sourceFile), "utf8"), /0\.6\.5/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
   }
 });

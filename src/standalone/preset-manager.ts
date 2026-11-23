@@ -9,6 +9,7 @@ import { atomicWrite, safePath } from "../workspace/fs";
 import { withWorkspaceLock } from "../workspace/lock";
 import { compile, type Toolchain } from "../judge/judge";
 import { WorkspaceStore } from "../workspace/store";
+import { cTemplate } from "../workspace/sources";
 import { hash, type Binding } from "../model";
 
 const DATA_PACKAGE = "@annouimo/c-exam-kit-preset";
@@ -22,6 +23,8 @@ export interface InstalledPreset {
 const execFileAsync = promisify(execFile);
 
 async function globalPreset(): Promise<InstalledPreset | undefined> {
+  const managed = process.env.ACCODING_PRESET_PACKAGE;
+  if (managed && path.isAbsolute(managed)) return readInstalledPreset(managed);
   let root: string;
   try {
     const windows = process.platform === "win32";
@@ -99,45 +102,43 @@ export async function setCoursePresetVersion(root: string, version: string): Pro
   });
 }
 
-export type UpdateMode = "unaccepted" | "empty" | "all" | "selected";
+export type UpdateMode = "empty" | "selected";
+
+async function untouchedSource(root: string, binding: Binding, source: string, code: string) {
+  let initial = binding.initialSourceHash;
+  if (!initial) {
+    const mark = await safePath(root, ".accoding/initial-hashes/" + binding.bindingId + ".json");
+    try {
+      initial = (JSON.parse(await fs.readFile(mark, "utf8")) as { sourceHash?: string }).sourceHash;
+    } catch (error) {
+      if (!["ENOENT", "EISDIR"].includes((error as NodeJS.ErrnoException).code ?? "") &&
+          !(error instanceof SyntaxError)) throw error;
+    }
+  }
+  if (initial) return hash(code) === initial;
+  const include = sharedInclude(root, source, code);
+  return Boolean(include && code === '#include "' + include.include + '"\n' + cTemplate);
+}
 
 export async function chooseUpdateTargets(
-  root: string,
-  bindings: Binding[],
-  mode: UpdateMode,
-  activity: (b: Binding) => { accepted?: boolean; verdict?: string },
-  selected: string[] = []
-): Promise<{ targets: Binding[]; excludedUnknown: number }> {
-  const eligible = bindings.filter(b => !b.unavailable &&
-    b.sourceFile.toLowerCase().endsWith(".c"));
-  if (mode === "all") return { targets: eligible, excludedUnknown: 0 };
-  if (mode === "selected") return {
-    targets: eligible.filter(b => selected.includes(b.bindingId)), excludedUnknown: 0
-  };
-  if (mode === "unaccepted") {
-    const known = eligible.filter(b => activity(b).accepted ||
-      typeof activity(b).verdict === "string");
-    return {
-      targets: known.filter(b => !activity(b).accepted &&
-        activity(b).verdict?.trim().toUpperCase() !== "AC"),
-      excludedUnknown: eligible.length - known.length
-    };
-  }
-  const blank: Binding[] = [];
-  let unknown = 0;
-  for (const b of eligible) {
-    const mark = path.join(root, ".accoding", "initial-hashes", b.bindingId + ".json");
-    let initial = b.initialSourceHash;
-    try { initial ??= (JSON.parse(await fs.readFile(mark, "utf8")) as
-      { sourceHash?: string }).sourceHash;
-    } catch (error) {
+  root: string, bindings: Binding[], mode: UpdateMode, selected: string[] = [], version?: string
+): Promise<{ targets: Binding[]; retained: number }> {
+  const eligible = bindings.filter(b => !b.unavailable && /\.c$/i.test(b.sourceFile));
+  const targets: Binding[] = [];
+  let retained = 0;
+  for (const binding of eligible) {
+    if (mode === "selected" && !selected.includes(binding.bindingId)) continue;
+    const source = await safePath(root, binding.sourceFile);
+    const code = await fs.readFile(source, "utf8").catch(error => {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    if (!initial) { unknown++; continue; }
-    const code = await fs.readFile(await safePath(root, b.sourceFile), "utf8");
-    if (hash(code) === initial) blank.push(b);
+      return undefined;
+    });
+    if (code !== undefined && version && sharedInclude(root, source, code)?.key === version) continue;
+    if (code !== undefined && (mode === "selected" || await untouchedSource(root, binding, source, code)))
+      targets.push(binding);
+    else retained++;
   }
-  return { targets: blank, excludedUnknown: unknown };
+  return { targets, retained };
 }
 
 const SNAPSHOT_KEY = /^(?:[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?|local-[a-f0-9]{64})$/;
@@ -237,20 +238,22 @@ async function previousPreset(
 }
 
 export async function applyPresetVersion(
-  root: string, binding: Binding, installed: InstalledPreset, toolchain: Toolchain
-): Promise<void> {
+  root: string, binding: Binding, installed: InstalledPreset, toolchain: Toolchain, onlyUntouched = false
+): Promise<boolean> {
   const source = await safePath(root, binding.sourceFile);
   if (path.extname(source).toLowerCase() !== ".c") throw new Error("仅 C99 支持 C Exam Kit。");
   const preset = installed.preset;
   const target = await saveSharedPreset(root, preset, installed.version);
   const nextInclude = presetInclude(source, target.directory);
-  await withWorkspaceLock(path.join(root, ".accoding", "presets", "switch.lock"), async () => {
+  return withWorkspaceLock(path.join(root, ".accoding", "presets", "switch.lock"), async () => {
     const workspace = new WorkspaceStore(root);
     const current = await workspace.read(binding.bindingId);
     const code = await fs.readFile(source, "utf8");
+    if (onlyUntouched && !(await untouchedSource(root, current, source, code)))
+      throw new Error("源码已改动或无法确认初始内容。");
     const previous = await previousPreset(root, current, source, code);
     if (!previous) throw new Error("此题没有可切换的脚手架引用。");
-    if (previous.key === target.key && previous.include === nextInclude) return;
+    if (previous.key === target.key && previous.include === nextInclude) return false;
     const updated = replaceInclude(code, previous.include, nextInclude);
     if (updated === code) throw new Error("找不到此题的脚手架 include。");
     const expanded = assembleC(updated, preset, nextInclude).code;
@@ -264,10 +267,11 @@ export async function applyPresetVersion(
     if ((await fs.readFile(source, "utf8")) !== code) throw new Error("源码已改变，请重试。");
     await workspace.update(current.bindingId, current.revision, (entry) => {
       (entry.presetUndo ??= {})[target.key] = previous.key;
-      if (entry.initialSourceHash === hash(code)) entry.initialSourceHash = hash(updated);
+      if (onlyUntouched || entry.initialSourceHash === hash(code)) entry.initialSourceHash = hash(updated);
     });
     if ((await fs.readFile(source, "utf8")) !== code) throw new Error("源码已改变，请重试。");
     await atomicWrite(source, updated);
+    return true;
   });
 }
 

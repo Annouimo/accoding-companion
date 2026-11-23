@@ -22,7 +22,6 @@ export async function fetchContestSnapshotForImport(
   } catch (e) {
     // Cancellation must not start a fallback request with a fresh login session.
     if (!(e instanceof ApiError)) throw e;
-    report?.(`比赛 #${id}：管理端不可用（${e.kind}），使用学生端。`);
   }
   return new ContestAdapter(student).snapshot(id);
 }
