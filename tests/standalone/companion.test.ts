@@ -9,7 +9,7 @@ import { migrateLegacyWorkspace } from "../../src/standalone/migrate";
 import { installedPresets, applyPresetVersion, undoPresetUpdate,
   chooseUpdateTargets } from "../../src/standalone/preset-manager";
 import { loadPreset, renderHeader } from "../../src/standalone/scaffold";
-import { toolchain } from "../../src/standalone/workflow";
+import { StandaloneWorkflow, toolchain } from "../../src/standalone/workflow";
 import { hash, type Problem } from "../../src/model";
 
 const problem: Problem = {
@@ -91,5 +91,27 @@ test("installed npm C99 data and per-question update preserve original code", as
     if(previous===undefined)delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME=previous;
     await fs.rm(temp,{recursive:true,force:true});
+  }
+});
+
+test("missing C99 package gives an actionable error while C++17 needs no preset", async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-no-preset-"));
+  const previous = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(temp, "data");
+  const app = new StandaloneWorkflow();
+  try {
+    const cRoot = path.join(temp, "c-course");
+    const cppRoot = path.join(temp, "cpp-course");
+    await fs.mkdir(cRoot);
+    await fs.mkdir(cppRoot);
+    await courseSettings(cRoot, "c");
+    await courseSettings(cppRoot, "cpp");
+    await assert.rejects(() => app.activePreset(undefined, cRoot), /C Exam Kit/);
+    assert.equal(await app.activePreset(undefined, cppRoot), undefined);
+  } finally {
+    app.dispose();
+    if (previous === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previous;
+    await fs.rm(temp, { recursive: true, force: true });
   }
 });
