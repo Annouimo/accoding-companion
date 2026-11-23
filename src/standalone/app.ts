@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+declare const __ACCODING_VERSION__: string;
 import path from "node:path";
 import { configDirectory } from "./state";
 import { spawn } from "node:child_process";
@@ -272,6 +273,9 @@ async function showPaths(app: StandaloneWorkflow): Promise<void> {
 
 async function run(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args.includes("--version") || args.includes("-V")) {
+    console.log(__ACCODING_VERSION__); return;
+  }
   if (args.includes("--help") || args.includes("-h")) { usage(); return; }
   const app = new StandaloneWorkflow();
   try {
