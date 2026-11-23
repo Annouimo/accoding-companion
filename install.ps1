@@ -2,12 +2,14 @@
 param(
   [switch]$SoftwareOnly,
   [switch]$PresetOnly,
-  [switch]$Yes
+  [switch]$Yes,
+  [switch]$Next
 )
 $ErrorActionPreference = 'Stop'
 if ($SoftwareOnly -and $PresetOnly) { throw 'Choose only one component filter.' }
 $cliPackage = '@annouimo/accoding-companion'
 $presetPackage = '@annouimo/c-exam-kit-preset'
+$channel = if ($Next) { 'next' } else { 'latest' }
 
 function Confirm-Action([string]$Message) {
   if ($Yes) { return $true }
@@ -40,9 +42,10 @@ if (-not $valid) {
   exit 2
 }
 Write-Host "Node $(node.exe --version), npm $(npm.cmd --version): ready"
+Write-Host "Release channel: $channel"
 
 function Remote-Version([string]$Package) {
-  $output = & npm.cmd view $Package version --fetch-retries=1 2>$null
+  $output = & npm.cmd view "$Package@$channel" version --fetch-retries=1 2>$null
   if ($LASTEXITCODE -ne 0 -or -not $output) {
     throw "Cannot query $Package from the configured npm registry."
   }
