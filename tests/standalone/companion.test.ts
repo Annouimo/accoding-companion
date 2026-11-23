@@ -6,7 +6,8 @@ import path from "node:path";
 import { WorkspaceStore } from "../../src/workspace/store";
 import { courseSettings } from "../../src/standalone/workspaces";
 import { migrateLegacyWorkspace } from "../../src/standalone/migrate";
-import { installedPresets, applyPresetVersion, undoPresetUpdate,
+import { execFileSync } from "node:child_process";
+import { installedPresets, setCoursePresetVersion, applyPresetVersion, undoPresetUpdate,
   chooseUpdateTargets } from "../../src/standalone/preset-manager";
 import { loadPreset, renderHeader } from "../../src/standalone/scaffold";
 import { StandaloneWorkflow, toolchain } from "../../src/standalone/workflow";
@@ -49,6 +50,8 @@ test("installed npm C99 data and per-question update preserve original code", as
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),"accoding-package-"));
   const previous=process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME=path.join(temp,"data");
+  const previousPrefix = process.env.npm_config_prefix;
+  process.env.npm_config_prefix = path.join(temp, "npm global");
   try {
     const root=path.join(temp,"course");
     await fs.mkdir(root);
@@ -76,8 +79,19 @@ test("installed npm C99 data and per-question update preserve original code", as
     await fs.writeFile(path.join(pkg,"package.json"),
       JSON.stringify({name:"@annouimo/c-exam-kit-preset",version:"0.1.0"}));
     await fs.cp(example,path.join(pkg,"preset"),{recursive:true});
-    const installed=await installedPresets();
-    assert.equal(installed.length,1);
+    assert.deepEqual((await installedPresets()).map((entry) => entry.version), ["0.1.0"]);
+    const windows = process.platform === "win32";
+    const npmRoot = execFileSync(windows ? process.env.ComSpec || "cmd.exe" : "npm",
+      windows ? ["/d", "/s", "/c", "npm.cmd root --global"] : ["root", "--global"],
+      { encoding: "utf8" }).trim();
+    const global = path.join(npmRoot, "@annouimo", "c-exam-kit-preset");
+    await fs.mkdir(path.dirname(global), { recursive: true });
+    await fs.cp(pkg, global, { recursive: true });
+    await fs.writeFile(path.join(global, "package.json"),
+      JSON.stringify({ name: "@annouimo/c-exam-kit-preset", version: "0.2.0" }));
+    const installed = await installedPresets();
+    assert.deepEqual(installed.map((entry) => entry.version), ["0.2.0"]);
+    await setCoursePresetVersion(root, "0.2.0");
     const marker=path.join(root,".accoding","initial-hashes",binding.bindingId+".json");
     await fs.mkdir(path.dirname(marker),{recursive:true});
     await fs.writeFile(marker,JSON.stringify({sourceHash:hash(sourceCode)}));
@@ -85,23 +99,29 @@ test("installed npm C99 data and per-question update preserve original code", as
     assert.equal(blank.targets.length,1);
     await applyPresetVersion(root, binding, installed[0], toolchain());
     const updated = await fs.readFile(source, "utf8");
-    assert.match(updated, /\.accoding\/presets\/0\.1\.0\/expanded\.h/);
+    assert.match(updated, /\.accoding\/presets\/0\.2\.0\/expanded\.h/);
     assert.equal(updated.replace(/#include "[^"]+"/, '#include "exam.h"'), sourceCode);
     const second = await store.import({ ...problem, target: { kind: "problemset", problemId: "321" } }, "B-Test");
     await fs.writeFile(path.join(root, second.sourceFile), updated);
+    await fs.rm(global, { recursive: true });
+    await fs.rm(pkg, { recursive: true });
     const app = new StandaloneWorkflow();
     try {
+      assert.deepEqual(await installedPresets(), []);
+      assert.equal((await app.activePreset(undefined, root))?.manifest.id, preset.manifest.id);
       const left = await app.prepare(await app.resolve(source));
       const right = await app.prepare(await app.resolve(path.join(root, second.sourceFile)));
       assert.equal(left.code, right.code);
     } finally { app.dispose(); }
     assert.equal((await fs.readdir(path.join(root, ".accoding", "presets")))
-      .filter((name) => name === "0.1.0").length, 1);
+      .filter((name) => name === "0.2.0").length, 1);
     await undoPresetUpdate(root, binding);
     const undone = await fs.readFile(source, "utf8");
     assert.match(undone, /\.accoding\/presets\/local-[a-f0-9]{64}\/expanded\.h/);
     assert.equal(undone.replace(/#include "[^"]+"/, '#include "exam.h"'), sourceCode);
   } finally {
+    if (previousPrefix === undefined) delete process.env.npm_config_prefix;
+    else process.env.npm_config_prefix = previousPrefix;
     if(previous===undefined)delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME=previous;
     await fs.rm(temp,{recursive:true,force:true});
@@ -111,6 +131,8 @@ test("installed npm C99 data and per-question update preserve original code", as
 test("missing C99 package gives an actionable error while C++17 needs no preset", async () => {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-no-preset-"));
   const previous = process.env.XDG_DATA_HOME;
+  const previousPrefix = process.env.npm_config_prefix;
+  process.env.npm_config_prefix = path.join(temp, "npm global");
   process.env.XDG_DATA_HOME = path.join(temp, "data");
   const app = new StandaloneWorkflow();
   try {
@@ -124,6 +146,8 @@ test("missing C99 package gives an actionable error while C++17 needs no preset"
     assert.equal(await app.activePreset(undefined, cppRoot), undefined);
   } finally {
     app.dispose();
+    if (previousPrefix === undefined) delete process.env.npm_config_prefix;
+    else process.env.npm_config_prefix = previousPrefix;
     if (previous === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = previous;
     await fs.rm(temp, { recursive: true, force: true });

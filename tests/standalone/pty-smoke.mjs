@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs the built CLI in a real Linux pseudo-terminal, without an Accoding account.
-// Regression: Ink unmount must not let Node exit before readline receives input.
+// Exercise navigation and inline input without submitting account credentials.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
@@ -61,40 +61,39 @@ async function scenario(name, run) {
   }
 }
 
-await scenario("menu -> readline -> result -> menu -> exit", async ctx => {
-  await ctx.expect("导入独立题目"); ctx.send("2");
-  await ctx.expect("题目 ID 或链接");
-  await delay(300);
-  assert.ok(ctx.alive(), "regression: CLI exited while waiting for a problem ID");
-  ctx.send("221\r");
-  await ctx.expect("导入结果");
-  await ctx.expect("返回");
-  ctx.send("\r");
-  await ctx.expect("导入独立题目");
-  ctx.send("q");
+await scenario("import opens the login form and can be cancelled", async ctx => {
+  await ctx.expect("❯ 导入"); ctx.send("\r");
+  await ctx.expect("导入比赛 / 作业"); ctx.send("\x1b[B");
+  await ctx.expect("❯ 导入独立题目"); ctx.send("\r");
+  await ctx.expect("Accoding 账号"); ctx.send("\x1b");
+  await ctx.expect("❯ 导入"); ctx.send("q");
 });
 
-await scenario("nested course setup -> C99 prompt -> back", async ctx => {
-  await ctx.expect("设置 / 切换工作区"); ctx.send("3");
-  await ctx.expect("选择 / 新建课程工作区"); ctx.send("\r");
-  await ctx.expect("添加已有工作区 / 新建课程文件夹"); ctx.send("\r");
-  await ctx.expect("课程文件夹"); ctx.send(path.join(ctx.home, "test-course") + "\r");
-  await ctx.expect("选择固定编程语言"); ctx.send("1\r");
-  await ctx.expect("操作结果"); ctx.send("\r");
-  await ctx.expect("设置 / 切换工作区");
-  const settings = JSON.parse(await fs.readFile(
-    path.join(ctx.home, "test-course", ".accoding", "workspace.json"), "utf8"));
+await scenario("nested course setup saves a C99 workspace", async ctx => {
+  await ctx.expect("❯ 导入"); ctx.send("\x1b[B");
+  await ctx.expect("❯ 设置"); ctx.send("\r");
+  await ctx.expect("切换或新建课程"); ctx.send("\r");
+  await ctx.expect("输入已有或新课程目录"); ctx.send("\r");
+  await ctx.expect("课程目录（可粘贴或拖入路径）");
+  const directory = path.join(ctx.home, "test-course");
+  ctx.send(directory); await ctx.expect(directory); ctx.send("\r");
+  await ctx.expect("选择课程的编程语言"); ctx.send("\r");
+  await ctx.expect("test-course");
+  const settings = JSON.parse(await fs.readFile(path.join(directory, ".accoding", "workspace.json"), "utf8"));
   assert.equal(settings.language, "c");
   ctx.send("q");
 });
 
-await scenario("login -> password -> ESC cancel -> menu", async ctx => {
-  await ctx.expect("登录 Accoding"); ctx.send("4");
-  await ctx.expect("Accoding 账号"); ctx.send("fake-student\r");
+await scenario("password form stays open until cancelled", async ctx => {
+  await ctx.expect("❯ 导入"); ctx.send("\x1b[B");
+  await ctx.expect("❯ 设置"); ctx.send("\r");
+  await ctx.expect("切换或新建课程"); ctx.send("\x1b[B");
+  await ctx.expect("❯ 登录 Accoding"); ctx.send("\r");
+  await ctx.expect("Accoding 账号");
+  ctx.send("fake-student"); await ctx.expect("fake-student"); ctx.send("\r");
   await ctx.expect("Accoding 密码");
   await delay(250);
   assert.ok(ctx.alive(), "CLI exited while waiting for password input");
   ctx.send("\x1b");
-  await ctx.expect("登录结果"); ctx.send("\r");
-  await ctx.expect("登录 Accoding"); ctx.send("q");
+  await ctx.expect("❯ 设置"); ctx.send("q");
 });

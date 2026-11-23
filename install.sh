@@ -49,25 +49,15 @@ fi
 echo "Node $(node --version), npm $(npm --version): ready"
 echo "Release channel: $channel"
 
-if [[ "$(uname -s)" == Darwin ]]; then
-  data_root="$HOME/Library/Application Support/Accoding Companion"
-else
-  data_home="$(printenv XDG_DATA_HOME || true)"
-  if [[ -z "$data_home" ]]; then data_home="$HOME/.local/share"; fi
-  data_root="$data_home/accoding-companion"
-fi
 remote_version() {
-  npm view "$1@$channel" version --fetch-retries=1 2>/dev/null | tail -1
+  npm view "$1@$channel" version --prefer-online --fetch-retries=1 2>/dev/null | tail -1
 }
-local_cli() {
-  npm ls -g --depth=0 --json 2>/dev/null | node -e '
-    let data="";
-    process.stdin.on("data",c=>data+=c);
-    process.stdin.on("end",()=>{
-      try {console.log(JSON.parse(data).dependencies?.["@annouimo/accoding-companion"]?.version||"not installed");}
-      catch {console.log("not installed");}
-    });
-  ' || echo "not installed"
+global_root="$(npm root --global)"
+local_version() {
+  node -e '
+    try { console.log(require(process.argv[1]).version || "not installed"); }
+    catch { console.log("not installed"); }
+  ' "$global_root/$1/package.json"
 }
 needs_cli=0
 needs_preset=0
@@ -76,7 +66,7 @@ if [[ "$mode" != preset ]]; then
   if [[ -z "$newest_cli" ]]; then
     echo "Could not query $CLI from the configured npm registry." >&2; exit 1
   fi
-  current_cli="$(local_cli)"
+  current_cli="$(local_version "$CLI")"
   echo "Software: $current_cli -> $newest_cli"
   if [[ "$current_cli" != "$newest_cli" ]]; then needs_cli=1; fi
 fi
@@ -85,11 +75,10 @@ if [[ "$mode" != software ]]; then
   if [[ ! "$newest_preset" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
     echo "Could not resolve a valid C Exam Kit version." >&2; exit 1
   fi
-  target="$data_root/presets/$newest_preset"
-  manifest="$target/node_modules/$PRESET/preset/manifest.json"
-  if [[ -f "$manifest" ]]; then echo "C Exam Kit: $newest_preset (installed)"
-  else echo "C Exam Kit: download $newest_preset"; needs_preset=1
-  fi
+  manifest="$global_root/$PRESET/preset/manifest.json"
+  current_preset="$(local_version "$PRESET")"
+  echo "C Exam Kit: $current_preset -> $newest_preset"
+  if [[ "$current_preset" != "$newest_preset" || ! -f "$manifest" ]]; then needs_preset=1; fi
 fi
 if [[ "$needs_cli" == 0 && "$needs_preset" == 0 ]]; then
   echo "Everything selected is already up to date."
@@ -104,9 +93,7 @@ if [[ "$needs_cli" == 1 ]]; then
   echo "Software installed: $(accoding --version)"
 fi
 if [[ "$needs_preset" == 1 ]]; then
-  mkdir -p "$target"
-  npm install --prefix "$target" --no-save --ignore-scripts \
-    --no-audit --no-fund "$PRESET@$newest_preset"
+  npm install --global --ignore-scripts --no-audit --no-fund "$PRESET@$newest_preset"
   node - "$manifest" <<'NODE'
 const fs = require("node:fs");
 const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));

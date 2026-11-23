@@ -213,13 +213,13 @@ export class StandaloneWorkflow {
         const shared = await sharedPresetPath(root, config.presetVersion);
         if (await fileExists(path.join(shared, "manifest.json"))) return loadPreset(shared);
         const found = await presetForVersion(config.presetVersion);
-        return loadPreset(found.manifestPath);
+        return found.preset;
       }
     }
     const global = (await this.state.load()).presetPath;
     if (global) return loadPreset(global);
     // No silent fallback to the old GCD/LCM demonstration header.
-    throw new Error("此 C99 课程尚未配置正式 C Exam Kit。请先安装 @annouimo/c-exam-kit-preset@next，再在“设置 → 脚手架版本”中设为课程默认版本。");
+    throw new Error("此 C99 课程尚未配置正式 C Exam Kit。请先运行 npm install -g @annouimo/c-exam-kit-preset@next，再在“设置 → 脚手架版本”中设为课程默认版本。");
   }
 
   async setPreset(file?: string): Promise<void> {

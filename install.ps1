@@ -45,31 +45,31 @@ Write-Host "Node $(node.exe --version), npm $(npm.cmd --version): ready"
 Write-Host "Release channel: $channel"
 
 function Remote-Version([string]$Package) {
-  $output = & npm.cmd view "$Package@$channel" version --fetch-retries=1 2>$null
+  $output = & npm.cmd view "$Package@$channel" version --prefer-online --fetch-retries=1 2>$null
   if ($LASTEXITCODE -ne 0 -or -not $output) {
     throw "Cannot query $Package from the configured npm registry."
   }
   return ([string]($output | Select-Object -Last 1)).Trim()
 }
-function Installed-Cli {
-  $output = & npm.cmd ls -g --depth=0 --json 2>$null
-  try {
-    $obj = $output | Out-String | ConvertFrom-Json
-    $entry = $obj.dependencies.PSObject.Properties[$cliPackage]
-    if ($entry) { return [string]$entry.Value.version }
-  } catch {}
+$globalRoot = & npm.cmd root --global
+if ($LASTEXITCODE -ne 0 -or -not $globalRoot) { throw 'Cannot find the global npm directory.' }
+$globalRoot = $globalRoot.Trim()
+function Installed-Version([string]$Package) {
+  $metadata = Join-Path (Join-Path $globalRoot $Package) 'package.json'
+  if (Test-Path -LiteralPath $metadata -PathType Leaf) {
+    try {
+      $version = (Get-Content -LiteralPath $metadata -Raw | ConvertFrom-Json).version
+      if ($version) { return [string]$version }
+    } catch {}
+  }
   return 'not installed'
 }
-
-$localData = $env:LOCALAPPDATA
-if (-not $localData) { $localData = Join-Path $env:USERPROFILE 'AppData\Local' }
-$dataRoot = Join-Path $localData 'Accoding Companion'
 
 $needsCli = $false
 $needsPreset = $false
 if (-not $PresetOnly) {
   $cliVersion = Remote-Version $cliPackage
-  $current = Installed-Cli
+  $current = Installed-Version $cliPackage
   Write-Host "Software: $current -> $cliVersion"
   $needsCli = $current -ne $cliVersion
 }
@@ -78,11 +78,10 @@ if (-not $SoftwareOnly) {
   if ($presetVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$') {
     throw 'Invalid preset version returned by npm.'
   }
-  $target = Join-Path (Join-Path $dataRoot 'presets') $presetVersion
-  $manifest = Join-Path $target 'node_modules\@annouimo\c-exam-kit-preset\preset\manifest.json'
-  $needsPreset = -not (Test-Path -LiteralPath $manifest -PathType Leaf)
-  if ($needsPreset) { Write-Host "C Exam Kit: download $presetVersion" }
-  else { Write-Host "C Exam Kit: $presetVersion (installed)" }
+  $manifest = Join-Path $globalRoot '@annouimo\c-exam-kit-preset\preset\manifest.json'
+  $currentPreset = Installed-Version $presetPackage
+  $needsPreset = $currentPreset -ne $presetVersion -or -not (Test-Path -LiteralPath $manifest -PathType Leaf)
+  Write-Host "C Exam Kit: $currentPreset -> $presetVersion"
 }
 if (-not $needsCli -and -not $needsPreset) {
   Write-Host 'Everything selected is already up to date.'
@@ -98,8 +97,7 @@ if ($needsCli) {
   Write-Host 'Accoding Companion software installed.'
 }
 if ($needsPreset) {
-  New-Item -ItemType Directory -Force -Path $target | Out-Null
-  & npm.cmd install --prefix $target --no-save --ignore-scripts --no-audit --no-fund "$presetPackage@$presetVersion"
+  & npm.cmd install --global --ignore-scripts --no-audit --no-fund "$presetPackage@$presetVersion"
   if ($LASTEXITCODE -ne 0) { throw 'Preset download failed.' }
   if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
     throw 'Downloaded package is missing preset/manifest.json.'

@@ -15,7 +15,7 @@ on:
         description: "Must exactly match the checked-out prerelease package.json"
         type: string
         required: true
-        default: "0.2.0-next.2"
+        default: "0.2.0-next.3"
 
 permissions:
   contents: read

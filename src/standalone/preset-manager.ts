@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -14,48 +16,79 @@ const VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/;
 
 export interface InstalledPreset {
   version: string;
-  manifestPath: string;
+  preset: LoadedPreset;
 }
 
-/** Discover data-only packages downloaded by install.sh / install.ps1. No network. */
+const execFileAsync = promisify(execFile);
+
+async function globalPreset(): Promise<InstalledPreset | undefined> {
+  let root: string;
+  try {
+    const windows = process.platform === "win32";
+    const { stdout } = await execFileAsync(
+      windows ? process.env.ComSpec || "cmd.exe" : "npm",
+      windows ? ["/d", "/s", "/c", "npm.cmd root --global"] : ["root", "--global"],
+      { timeout: 5000, windowsHide: true },
+    );
+    root = stdout.trim();
+  } catch {
+    // A standalone binary can still read coursework and older local installs without npm.
+    return;
+  }
+  if (path.isAbsolute(root)) return readInstalledPreset(path.join(root, DATA_PACKAGE));
+}
+
+async function readInstalledPreset(packageRoot: string): Promise<InstalledPreset | undefined> {
+  let info: { name?: string; version?: string };
+  try {
+    info = JSON.parse(await fs.readFile(path.join(packageRoot, "package.json"), "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const manifestPath = path.join(packageRoot, "preset", "manifest.json");
+  if (info.name !== DATA_PACKAGE || !info.version || !VERSION.test(info.version))
+    throw new Error("脚手架包元数据无效：" + packageRoot);
+  try {
+    return { version: info.version, preset: await loadPreset(manifestPath) };
+  } catch (error) {
+    throw new Error("脚手架包损坏：" + info.version, { cause: error });
+  }
+}
+
+async function legacyPreset(version: string): Promise<InstalledPreset | undefined> {
+  const folder = path.join(dataDirectory(), "presets", version, "node_modules", DATA_PACKAGE);
+  const preset = await readInstalledPreset(folder);
+  if (preset?.version === version) return preset;
+}
+
+/** Prefer the npm global package. Older per-version installs are a migration fallback. */
 export async function installedPresets(): Promise<InstalledPreset[]> {
-  const folder = path.join(dataDirectory(), "presets");
+  const global = await globalPreset();
+  if (global) return [global];
   let names: string[];
-  try { names = await fs.readdir(folder); }
+  try { names = await fs.readdir(path.join(dataDirectory(), "presets")); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
-  const found: InstalledPreset[] = [];
-  for (const version of names) {
-    if (!VERSION.test(version)) continue;
-    const packageRoot = path.join(folder, version, "node_modules", DATA_PACKAGE);
-    const manifestPath = path.join(packageRoot, "preset", "manifest.json");
-    try {
-      const info = JSON.parse(await fs.readFile(
-        path.join(packageRoot, "package.json"), "utf8")) as { name?: string; version?: string };
-      if (info.name !== DATA_PACKAGE || info.version !== version) continue;
-      await loadPreset(manifestPath);
-      found.push({ version, manifestPath });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-        throw new Error("已下载的脚手架数据损坏：" + version);
-    }
-  }
-  found.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
-  return found;
+  const found = await Promise.all(names.filter((name) => VERSION.test(name)).map(legacyPreset));
+  return found.filter((preset) => preset !== undefined)
+    .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
 }
 
 export async function presetForVersion(version: string): Promise<InstalledPreset> {
   if (!VERSION.test(version)) throw new Error("无效的脚手架版本号。");
-  const found = (await installedPresets()).find((item) => item.version === version);
-  if (!found) throw new Error("此脚手架版本尚未安装；请先运行安装器下载。");
-  return found;
+  const global = await globalPreset();
+  if (global?.version === version) return global;
+  const legacy = await legacyPreset(version);
+  if (legacy) return legacy;
+  throw new Error("此脚手架版本尚未安装。请运行 npm install -g " + DATA_PACKAGE + "@" + version);
 }
 
 export async function setCoursePresetVersion(root: string, version: string): Promise<void> {
   const installed = await presetForVersion(version);
-  await saveSharedPreset(root, await loadPreset(installed.manifestPath), version);
+  await saveSharedPreset(root, installed.preset, version);
   const file = await safePath(root, ".accoding/workspace.json");
   await withWorkspaceLock(path.join(path.dirname(file), "write.lock"), async () => {
     const config = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
@@ -199,7 +232,7 @@ export async function applyPresetVersion(
 ): Promise<void> {
   const source = await safePath(root, binding.sourceFile);
   if (path.extname(source).toLowerCase() !== ".c") throw new Error("仅 C99 支持 C Exam Kit。");
-  const preset = await loadPreset(installed.manifestPath);
+  const preset = installed.preset;
   const target = await saveSharedPreset(root, preset, installed.version);
   const nextInclude = presetInclude(source, target.directory);
   await withWorkspaceLock(path.join(root, ".accoding", "presets", "switch.lock"), async () => {

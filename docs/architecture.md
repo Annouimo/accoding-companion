@@ -45,10 +45,10 @@ Ink 界面保持挂载，页面状态与面包屑共享课程、作业和题目�
 - macOS/Linux：`$XDG_CONFIG_HOME/accoding-companion/`，默认 `~/.config/accoding-companion/`
 - Windows：`%APPDATA%\accoding-companion\`
 
-本机下载包：
+安装器与应用通过 `npm root --global` 使用同一个全局 npm 目录。课程所用组件保存在工作区内。以下旧目录只用于兼容已有安装：
 
 - macOS：`~/Library/Application Support/Accoding Companion/presets/<version>`
 - Windows：`%LOCALAPPDATA%\Accoding Companion\presets\<version>`
 - Linux：`$XDG_DATA_HOME/accoding-companion/presets/<version>` 或 `~/.local/share/accoding-companion/presets/<version>`
 
-安装器与应用使用同一布局。敏感账户数据不随工作区发布，也不放在 npm 包中。
+敏感账户数据不随工作区发布，也不放在 npm 包中。
