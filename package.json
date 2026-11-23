@@ -1,6 +1,6 @@
 {
   "name": "@annouimo/accoding-companion",
-  "version": "0.2.0-next.3",
+  "version": "0.2.0",
   "description": "Non-official Accoding companion for C/C++ coursework",
   "type": "module",
   "private": true,
@@ -17,14 +17,18 @@
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "install.sh",
-    "install.ps1"
+    "install.ps1",
+    "launch.command",
+    "launch.cmd",
+    "launch.ps1"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/standalone/*.test.ts tests/standalone/*.test.mjs",
     "pack:dry": "npm pack --dry-run",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test:launcher": "node tests/standalone/launcher-smoke.mjs"
   },
   "dependencies": {},
   "devDependencies": {

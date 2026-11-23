@@ -47,27 +47,20 @@ node dist/accoding.mjs submit "/path/to/C语言课程/某次作业/A-题目/main
 node dist/accoding.mjs status --watch
 ```
 
-## npm 预览版安装
+## 安装和启动
 
-两个包可以通过 npm 全局安装：
+从 [v0.2.0 发布页](https://github.com/Annouimo/accoding-companion/releases/tag/v0.2.0) 下载并解压启动包。macOS 双击 `launch.command`，Windows 双击 `launch.cmd`。Linux 可以运行 `bash launch.command`。
+
+启动脚本检查 Node.js、主程序和 C Exam Kit。首次安装或有更新时会询问是否继续，完成后直接进入 Companion。已是最新版时会直接打开。断网时可以启动本机已安装的 Companion。
+
+也可以直接通过 npm 安装并启动：
 
 ```sh
-npm install -g @annouimo/accoding-companion@next @annouimo/c-exam-kit-preset@next
-accoding --version
+npm install -g @annouimo/accoding-companion @annouimo/c-exam-kit-preset
+accoding
 ```
 
-Companion 通过 `npm root --global` 找到 C Exam Kit。启用某个版本时，组件会复制到课程工作区。全局更新后，旧题仍可使用工作区已有的副本。
-
-进入 Accoding Companion 的「设置 → 课程工作区」创建 C99 课程；全新课程默认选择本机已安装的最新数据包。已有课程可在「设置 → 脚手架版本」中选择默认版本。C++17 不需要这个 C99 数据包。
-
-预备中的 [install.sh](install.sh)（macOS/Linux）和 [install.ps1](install.ps1)（Windows）在用户主动运行时：
-
-1. 检测 Node.js/npm，缺失时征求同意并提供官方安装途径；
-2. 查询 npm 上主程序和 C Exam Kit 数据包的可用版本；
-3. 选择一起更新，或使用 `--software-only`、`--preset-only`；
-4. 全局安装 CLI 和 preset，保留已有课程数据和题目快照。
-
-主程序包：`@annouimo/accoding-companion`；C99 数据包：`@annouimo/c-exam-kit-preset`。两个包目前均有公开的 `next` 预览版；没有 `latest` 稳定版。安装器仍需后续单独验收与修复。
+Companion 通过 `npm root --global` 找到 C Exam Kit。启用某个版本时，组件会复制到课程工作区。全局更新后，旧题仍可使用工作区已有的副本。已有课程可在「设置 → 脚手架版本」中选择默认版本。C++17 不需要这个 C99 数据包。
 
 脚手架下载后可以在 TUI 中设为课程默认版本，并选择更新 **所有空题目／所有未 AC 题目／所有题目／自选题目**。每题可以单独撤销。切换版本只修改 `main.c` 里的脚手架引用。
 

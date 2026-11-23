@@ -62,15 +62,15 @@ async function scenario(name, run) {
 }
 
 await scenario("import opens the login form and can be cancelled", async ctx => {
-  await ctx.expect("❯ 导入"); ctx.send("\r");
+  await ctx.expect("❯ 导入"); await delay(250); ctx.send("\r");
   await ctx.expect("导入比赛 / 作业"); ctx.send("\x1b[B");
   await ctx.expect("❯ 导入独立题目"); ctx.send("\r");
   await ctx.expect("Accoding 账号"); ctx.send("\x1b");
-  await ctx.expect("❯ 导入"); ctx.send("q");
+  await ctx.expect("❯ 导入"); await delay(250); ctx.send("q");
 });
 
 await scenario("nested course setup saves a C99 workspace", async ctx => {
-  await ctx.expect("❯ 导入"); ctx.send("\x1b[B");
+  await ctx.expect("❯ 导入"); await delay(250); ctx.send("\x1b[B");
   await ctx.expect("❯ 设置"); ctx.send("\r");
   await ctx.expect("切换或新建课程"); ctx.send("\r");
   await ctx.expect("输入已有或新课程目录"); ctx.send("\r");
@@ -85,7 +85,7 @@ await scenario("nested course setup saves a C99 workspace", async ctx => {
 });
 
 await scenario("password form stays open until cancelled", async ctx => {
-  await ctx.expect("❯ 导入"); ctx.send("\x1b[B");
+  await ctx.expect("❯ 导入"); await delay(250); ctx.send("\x1b[B");
   await ctx.expect("❯ 设置"); ctx.send("\r");
   await ctx.expect("切换或新建课程"); ctx.send("\x1b[B");
   await ctx.expect("❯ 登录 Accoding"); ctx.send("\r");
