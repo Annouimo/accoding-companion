@@ -516,9 +516,9 @@ export class StandaloneWorkflow {
             resolved.binding.bindingId, "expanded.h");
           const relative = path.relative(path.dirname(resolved.source), implementation)
             .split(path.sep).join("/");
-          const expected = "#ifndef ACCODING_EXAM_WRAPPER_H\\n" +
-            "#define ACCODING_EXAM_WRAPPER_H\\n" +
-            '#include "' + relative + '"\\n#endif\\n';
+          const expected = "#ifndef ACCODING_EXAM_WRAPPER_H\n" +
+            "#define ACCODING_EXAM_WRAPPER_H\n" +
+            '#include "' + relative + '"\n#endif\n';
           const visible = await fs.readFile(headerPath, "utf8");
           if (visible !== expected)
             throw new Error("exam.h 已被修改或不是本程序生成的入口文件，" +
