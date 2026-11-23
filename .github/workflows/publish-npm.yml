@@ -1,20 +1,8 @@
 name: Publish npm stable release
 
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: "DRY_RUN builds only; PUBLISH_LATEST publishes to npm latest"
-        type: choice
-        required: true
-        default: DRY_RUN
-        options:
-          - DRY_RUN
-          - PUBLISH_LATEST
-      expected_version:
-        description: "Must exactly match the checked-out stable package.json"
-        type: string
-        required: true
+  push:
+    branches: [publish/companion-0.2.3]
 
 permissions:
   contents: read
@@ -25,6 +13,7 @@ concurrency:
 
 jobs:
   pack:
+    if: ${{ github.event_name == 'push' && github.event.head_commit.message == 'Release npm latest 0.2.3' }}
     name: Build and validate Accoding Companion CLI
     runs-on: ubuntu-latest
     permissions:
@@ -39,10 +28,10 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Verify the intended source branch and stable version
         env:
-          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_VERSION: 0.2.3
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_REF" = "refs/heads/publish/companion-0.2.3"
           node - <<'NODE'
           const fs=require("node:fs");
           const file="package.json";
@@ -71,6 +60,7 @@ jobs:
           retention-days: 7
 
   launcher:
+    if: ${{ github.event_name == 'push' && github.event.head_commit.message == 'Release npm latest 0.2.3' }}
     name: Verify launcher (${{ matrix.os }})
     strategy:
       matrix:
@@ -97,7 +87,7 @@ jobs:
   publish:
     name: Publish Accoding Companion CLI to npm latest
     needs: [pack, launcher, launcher-bundles]
-    if: ${{ inputs.mode == 'PUBLISH_LATEST' }}
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -122,6 +112,7 @@ jobs:
           npm publish "$(realpath "$tarball")" --tag latest --access public
 
   launcher-bundles:
+    if: ${{ github.event_name == 'push' && github.event.head_commit.message == 'Release npm latest 0.2.3' }}
     name: Package native launchers and offline guide
     runs-on: ubuntu-latest
     permissions:
