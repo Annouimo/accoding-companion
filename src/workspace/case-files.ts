@@ -31,11 +31,11 @@ function contents(binding: Binding) {
     files[c.inputFile] = c.input;
     if (c.expectedOutputFile) files[c.expectedOutputFile] = c.expected;
     if (c.baseline) {
-      files[`${directory}/tests/originals/${c.id}.in`] = c.baseline.input;
-      files[`${directory}/tests/originals/${c.id}.out`] = c.baseline.expected;
+      files[`${directory}/originals/${c.id}.in`] = c.baseline.input;
+      files[`${directory}/originals/${c.id}.out`] = c.baseline.expected;
     }
   }
-  files[`${directory}/tests/tests.json`] = JSON.stringify(
+  files[`${directory}/tests.json`] = JSON.stringify(
     {
       schemaVersion: 2,
       bindingId: binding.bindingId,
