@@ -83,7 +83,7 @@ test("standalone C and C++ judge share the same persisted official samples", asy
     // independently of the submission assembler.
     const executable = path.join(folder, "local-program");
     execFileSync("cc", ["-std=c99", source, "-lm", "-o", executable], { cwd:folder });
-    assert.equal(execFileSync(executable, { cwd:folder, encoding:"utf8" }), "36\\n");
+    assert.equal(execFileSync(executable, { cwd:folder, encoding:"utf8" }), "36\n");
 
     const resolved = await app.resolve(source);
     assert.equal(await app.test(resolved), true);
