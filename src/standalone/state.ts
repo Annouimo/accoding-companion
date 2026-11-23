@@ -13,6 +13,7 @@ export interface ProblemActivity {
 export interface ApplicationState {
   schemaVersion: 1;
   lastWorkspace?: string;
+  recentWorkspaces?: string[];
   lastProblem?: string;
   lastAccount?: string;
   presetPath?: string;
@@ -83,6 +84,8 @@ export class StateStore {
   async rememberWorkspace(root: string): Promise<void> {
     const state = await this.load();
     state.lastWorkspace = path.resolve(root);
+    state.recentWorkspaces = [state.lastWorkspace,
+      ...(state.recentWorkspaces || []).filter(x => x !== state.lastWorkspace)].slice(0,12);
     await this.save(state);
   }
 
@@ -101,6 +104,8 @@ export class StateStore {
       lastActiveAt: new Date().toISOString()
     };
     state.lastWorkspace = path.resolve(root);
+    state.recentWorkspaces = [state.lastWorkspace,
+      ...(state.recentWorkspaces || []).filter(x => x !== state.lastWorkspace)].slice(0,12);
     state.lastProblem = key;
     state.lastAccount = account;
     await this.save(state);
