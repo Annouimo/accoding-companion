@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Problem } from "../model";
-import { ask, confirm, interactive } from "./terminal";
+import { ask, confirm, interactive, select } from "./terminal";
 
 export function droppedPath(raw: string, cwd = process.cwd(), home = os.homedir()): string {
   let text = raw.trim();
@@ -100,20 +100,125 @@ export async function initializeFriendlyLayout(root: string): Promise<boolean> {
 }
 
 export async function readableProblemDirectory(
-  root: string, problem: Problem
+  root: string, problem: Problem, parentDirectory?: string
 ): Promise<string> {
   const label = problem.target.kind === "contest"
     ? readableName(problem.label, "题")
     : "题目";
   const candidate = readableName(label + "-" + problem.title);
-  if (!(await exists(path.join(root, candidate)))) return candidate;
+  const prefix = parentDirectory || (problem.target.kind === "problemset" ? "独立题目" : "");
+  if (!prefix) throw new Error("必须先为比赛建立专属文件夹。");
+  await fs.mkdir(path.join(root, prefix), { recursive: true });
+  const relative = (name: string) => path.join(prefix, name);
+  if (!(await exists(path.join(root, relative(candidate))))) return relative(candidate);
   // Avoid accidentally taking ownership of an unrelated user's directory.
   const suffix = problem.target.problemId;
   const withId = readableName(candidate.slice(0, 54)) + "-" + suffix;
-  if (!(await exists(path.join(root, withId)))) return withId;
+  if (!(await exists(path.join(root, relative(withId))))) return relative(withId);
   for (let i = 2; i < 1000; i++) {
     const name = withId + "-" + i;
-    if (!(await exists(path.join(root, name)))) return name;
+    if (!(await exists(path.join(root, relative(name))))) return relative(name);
   }
   throw new Error("无法为题目分配不冲突的文件夹名称。");
+}
+
+
+export interface CourseSettings {
+  schemaVersion: 1;
+  kind: "course";
+  language: "c" | "cpp";
+}
+
+/** One course workspace, one language, any number of contest subdirectories. */
+export async function courseSettings(root: string, requested?: "c" | "cpp"): Promise<CourseSettings> {
+  const file = path.join(root, ".accoding", "workspace.json");
+  try {
+    const config: unknown = JSON.parse(await fs.readFile(file, "utf8"));
+    if (!config || typeof config !== "object" ||
+        (config as CourseSettings).schemaVersion !== 1 ||
+        (config as CourseSettings).kind !== "course" ||
+        !["c", "cpp"].includes((config as CourseSettings).language)) {
+      throw new Error("课程工作区配置格式未知；原文件已保留。");
+    }
+    const saved = config as CourseSettings;
+    if (requested && saved.language !== requested)
+      throw new Error("本工作区固定使用 " + saved.language +
+        "；请建立或切换另一个工作区，而不是更改已有源码语言。");
+    return saved;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  // Never silently take ownership of a legacy workspace or unrelated data.
+  if (await exists(path.join(root, ".better-accoding")))
+    throw new Error("检测到旧版工作区，请先使用旧版或执行经过备份的数据迁移。");
+  let language = requested;
+  if (!language && interactive()) {
+    const picked = await select("首次配置课程工作区：选择固定编程语言", [
+      { label: "C99", value: "c" }, { label: "C++17", value: "cpp" }
+    ]);
+    if (!picked) throw new Error("取消初始化工作区。");
+    language = picked as "c" | "cpp";
+  }
+  if (!language)
+    throw new Error("首次以非交互方式初始化工作区，请指定 --workspace-lang c 或 cpp。");
+  const config: CourseSettings = { schemaVersion: 1, kind: "course", language };
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  try {
+    await fs.writeFile(file, JSON.stringify(config, null, 2) + "\n",
+      { encoding: "utf8", flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    return courseSettings(root, requested);
+  }
+  return config;
+}
+
+/** Ask for a course root only once, not on every contest import. */
+export async function selectCourseDirectory(saved?: string, explicit?: string): Promise<string> {
+  if (explicit) return droppedPath(explicit);
+  if (saved) return droppedPath(saved);
+  const suggested = path.join(os.homedir(), "Accoding");
+  if (!interactive())
+    throw new Error("首次初始化请指定 --root DIR 和 --workspace-lang c|cpp。");
+  console.log("首次使用：选择课程文件夹。以后比赛会自动放进此文件夹。");
+  console.log("可从 Finder / 文件资源管理器拖入路径。");
+  const raw = await ask("课程文件夹", suggested);
+  return droppedPath(raw);
+}
+
+/** Never claim an unrelated user-owned directory just because its name matches. */
+export async function ensureContestDirectory(
+  root: string, contestId: string, title: string
+): Promise<string> {
+  if (!/^\d+$/.test(contestId)) throw new Error("无效比赛 ID");
+  const metadata = path.join(root, ".accoding", "contests", contestId + ".location.json");
+  try {
+    const info = JSON.parse(await fs.readFile(metadata, "utf8")) as {
+      contestId: string; directory: string;
+    };
+    if (info.contestId !== contestId ||
+        !info.directory || path.basename(info.directory) !== info.directory)
+      throw new Error("已保存的比赛目录信息异常。");
+    if (!(await exists(path.join(root, info.directory))))
+      throw new Error("比赛文件夹已被移走，请先恢复后再同步。");
+    return info.directory;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const base = readableName(title, "比赛-" + contestId);
+  for (const candidate of [base, base + "-" + contestId]) {
+    try {
+      await fs.mkdir(path.join(root, candidate));
+      await fs.mkdir(path.dirname(metadata), { recursive: true });
+      await fs.writeFile(metadata, JSON.stringify({
+        schemaVersion: 1, contestId, directory: candidate, title
+      }, null, 2) + "\n", { flag: "wx", encoding: "utf8" });
+      return candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      // If another process registered the exact contest, use its folder.
+      if (await exists(metadata)) return ensureContestDirectory(root, contestId, title);
+    }
+  }
+  throw new Error("已有同名目录，请重命名其中一个目录后重试；不会覆盖用户文件夹。");
 }
