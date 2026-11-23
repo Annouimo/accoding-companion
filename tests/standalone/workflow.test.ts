@@ -9,8 +9,48 @@ import { compile } from "../../src/judge/judge";
 import { StandaloneWorkflow, toolchain } from "../../src/standalone/workflow";
 import { StateStore, isAccepted, activityAccepted } from "../../src/standalone/state";
 import { builtinPreset } from "../../src/standalone/generated-preset";
-import { renderHeader } from "../../src/standalone/scaffold";
+import { loadPreset, PRESET_MANUAL, renderHeader } from "../../src/standalone/scaffold";
+import { presetInclude, saveSharedPreset } from "../../src/standalone/preset-manager";
 import { courseSettings } from "../../src/standalone/workspaces";
+
+test("manual follows the problem's offline snapshot and the course's default version", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-manual-"));
+  try {
+    const app = new StandaloneWorkflow();
+    const preset = await loadPreset(path.resolve(import.meta.dirname,
+      "../../scaffold/presets/example-c99"));
+    const old = await saveSharedPreset(root, preset, "0.6.5");
+    const initial = await saveSharedPreset(root, preset, "0.6.6");
+    const recent = await saveSharedPreset(root, { ...preset, manual: "# 0.6.6\n" }, "0.6.6");
+    assert.equal(initial.directory, recent.directory);
+    assert.equal((await loadPreset(recent.directory)).manual, "# 0.6.6\n");
+    const config = await courseSettings(root, "c");
+    await fs.writeFile(path.join(root, ".accoding", "workspace.json"),
+      JSON.stringify({ ...config, presetVersion: "0.6.6" }));
+
+    const workspace = new WorkspaceStore(root);
+    for (const [id, snapshot] of [["123", old], ["124", recent]] as const) {
+      await workspace.import({
+        target: { kind: "problemset", problemId: id },
+        title: "Offline " + id, label: "#" + id,
+        statement: { format: "markdown", content: "", baseUrl: "https://accoding.buaa.edu.cn/" },
+        languages: ["c"], samples: [], warnings: [], special: false
+      });
+      const source = path.join(root, "problems", id, "main.c");
+      await fs.writeFile(source, '#include "' + presetInclude(source, snapshot.directory) + '"\n');
+    }
+    const oldProblem = await app.resolve(path.join(root, "problems", "123", "main.c"));
+    const newProblem = await app.resolve(path.join(root, "problems", "124", "main.c"));
+    const manual = path.join(recent.directory, PRESET_MANUAL);
+    assert.equal(await app.presetManualPath(root), manual);
+    assert.equal(await app.presetManualPath(root, newProblem), manual);
+    await assert.rejects(app.presetManualPath(root, oldProblem), /0\.6\.5 没有本地函数手册/);
+    await saveSharedPreset(root, { ...preset, manual: "# 0.6.5\n" }, "0.6.5");
+    assert.equal(await fs.readFile(await app.presetManualPath(root, oldProblem), "utf8"), "# 0.6.5\n");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test("state persists verdict per account and source path", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-state-"));

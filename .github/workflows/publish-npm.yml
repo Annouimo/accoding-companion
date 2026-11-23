@@ -15,7 +15,6 @@ on:
         description: "Must exactly match the checked-out stable package.json"
         type: string
         required: true
-        default: "0.2.0"
 
 permissions:
   contents: read
@@ -43,7 +42,7 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/feat/lean-workspace-navigation"
+          test "$GITHUB_REF" = "refs/heads/main"
           node - <<'NODE'
           const fs=require("node:fs");
           const file="package.json";

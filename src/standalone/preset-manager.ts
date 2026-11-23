@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { dataDirectory } from "./state";
-import { loadPreset, renderHeader, assembleC, quotedIncludes, type LoadedPreset } from "./scaffold";
+import { loadPreset, renderHeader, assembleC, quotedIncludes, PRESET_MANUAL, type LoadedPreset } from "./scaffold";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { withWorkspaceLock } from "../workspace/lock";
 import { compile, type Toolchain } from "../judge/judge";
@@ -157,13 +157,20 @@ export async function saveSharedPreset(root: string, preset: LoadedPreset, versi
   const destination = await sharedPresetPath(root, key);
   const base = path.dirname(destination);
   await withWorkspaceLock(path.join(base, "write.lock"), async () => {
+    let existing: LoadedPreset | undefined;
     try {
-      const existing = await loadPreset(destination);
-      if (presetFingerprint(existing) !== fingerprint)
-        throw new Error("已保存的脚手架版本与安装包内容不一致：" + key);
-      return;
+      existing = await loadPreset(destination);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (existing) {
+      if (presetFingerprint(existing) !== fingerprint)
+        throw new Error("已保存的脚手架版本与安装包内容不一致：" + key);
+      if (existing.manual === undefined && preset.manual !== undefined) {
+        const manualFile = await safePath(destination, PRESET_MANUAL);
+        await atomicWrite(manualFile, preset.manual);
+      }
+      return;
     }
     const stage = path.join(base, ".stage-" + randomUUID());
     try {
@@ -175,6 +182,8 @@ export async function saveSharedPreset(root: string, preset: LoadedPreset, versi
       await fs.writeFile(path.join(stage, "manifest.json"),
         JSON.stringify(preset.manifest, null, 2) + "\n");
       await fs.writeFile(path.join(stage, "expanded.h"), renderHeader(preset));
+      if (preset.manual !== undefined)
+        await fs.writeFile(path.join(stage, PRESET_MANUAL), preset.manual);
       await fs.rename(stage, destination);
     } finally {
       await fs.rm(stage, { recursive: true, force: true });

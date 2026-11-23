@@ -13,7 +13,7 @@ import { sendSubmission } from "../submissions/send";
 import { SubmissionStore, isPending } from "../submissions/store";
 import { monitorSubmissions } from "../submissions/monitor";
 import { bindingId, hash, parseImport, type Binding, type Problem, type Target } from "../model";
-import { assembleC, loadPreset, quotedIncludes, type LoadedPreset } from "./scaffold";
+import { assembleC, loadPreset, quotedIncludes, PRESET_MANUAL, type LoadedPreset } from "./scaffold";
 import { readableStatement } from "../problems/statement";
 import { StateStore, isAccepted, activityAccepted } from "./state";
 import { installedPresets, presetForVersion, setCoursePresetVersion,
@@ -198,6 +198,41 @@ export class StandaloneWorkflow {
     await this.state.rememberCompiler(language, executable.trim());
     console.log((language === "c" ? "C" : "C++") +
       " 编译器：" + (executable.trim() || "自动检测"));
+  }
+
+  async presetManualPath(root: string, problem?: ResolvedProblem): Promise<string> {
+    let directory: string;
+    let version: string;
+    if (problem) {
+      if (path.extname(problem.source).toLowerCase() !== ".c")
+        throw new Error("此题不使用 C99 脚手架。");
+      const code = await fs.readFile(problem.source, "utf8");
+      const shared = sharedInclude(root, problem.source, code);
+      if (shared) {
+        version = shared.key;
+        directory = await sharedPresetPath(root, version);
+      } else {
+        directory = await safePath(root, ".accoding/scaffold/" + problem.binding.bindingId);
+        if (!(await fileExists(path.join(directory, "manifest.json"))))
+          throw new Error("此题未引用工作区中的 C99 脚手架。");
+        version = "旧版快照（版本未知）";
+      }
+    } else {
+      if (!(await fileExists(path.join(root, ".accoding", "workspace.json"))))
+        throw new Error("请先配置 C99 课程工作区。");
+      const config = await courseSettings(root);
+      if (config.language !== "c") throw new Error("此工作区不使用 C99 脚手架。");
+      if (!config.presetVersion) throw new Error("请先在设置中选择课程脚手架版本。");
+      version = config.presetVersion;
+      directory = await sharedPresetPath(root, version);
+    }
+    const manual = await safePath(directory, PRESET_MANUAL);
+    const found = await fs.stat(manual).then(stat => stat.isFile(), error => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return false;
+    });
+    if (!found) throw new Error("脚手架 " + version + " 没有本地函数手册。");
+    return manual;
   }
 
   async activePreset(explicit?: string, root?: string): Promise<LoadedPreset | undefined> {
