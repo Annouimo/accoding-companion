@@ -17,6 +17,9 @@ import { assembleC, renderHeader, loadPreset, type LoadedPreset } from "./scaffo
 import { readableStatement } from "../problems/statement";
 import { builtinPreset } from "./generated-preset";
 import { StateStore, isAccepted, activityAccepted } from "./state";
+import { installedPresets, presetForVersion, setCoursePresetVersion,
+  chooseUpdateTargets, applyPresetVersion, undoPresetUpdate,
+  type UpdateMode } from "./preset-manager";
 import { credentialsBackend } from "./secrets";
 import { ask, confirm, interactive, select, password } from "./terminal";
 import { selectCourseDirectory, courseSettings, ensureContestDirectory, isFriendlyWorkspace, readableProblemDirectory, droppedPath } from "./workspaces";
@@ -193,6 +196,16 @@ export class StandaloneWorkflow {
 
   private async ensureStatement(root: string, binding: Binding): Promise<void> {
     const folder = path.dirname(sourceFor(binding, root));
+    const mark = await safePath(root,
+      ".accoding/initial-hashes/" + binding.bindingId + ".json");
+    await fs.mkdir(path.dirname(mark), { recursive: true });
+    try {
+      await fs.writeFile(mark, JSON.stringify({
+        sourceHash: hash(await fs.readFile(sourceFor(binding, root), "utf8"))
+      }) + "\n", { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
     const readable = path.join(folder, "题目.md");
     try {
       await fs.writeFile(readable, readableStatement(binding.problem),
@@ -214,9 +227,17 @@ export class StandaloneWorkflow {
       " 编译器：" + (executable.trim() || "自动检测"));
   }
 
-  async activePreset(explicit?: string): Promise<LoadedPreset> {
-    const file = explicit || (await this.state.load()).presetPath;
-    return file ? loadPreset(file) : builtinPreset();
+  async activePreset(explicit?: string, root?: string): Promise<LoadedPreset> {
+    if (explicit) return loadPreset(explicit);
+    if (root) {
+      const config = await courseSettings(root);
+      if (config.presetVersion) {
+        const found = await presetForVersion(config.presetVersion);
+        return loadPreset(found.manifestPath);
+      }
+    }
+    const global = (await this.state.load()).presetPath;
+    return global ? loadPreset(global) : builtinPreset();
   }
 
   async setPreset(file?: string): Promise<void> {
@@ -227,6 +248,50 @@ export class StandaloneWorkflow {
         "，共 " + preset.manifest.components.length + " 个组件。");
     }
     await this.state.rememberPreset(selected);
+  }
+
+  async installedPresetVersions() {
+    return installedPresets();
+  }
+
+  async setWorkspacePreset(version: string, rootArg?: string): Promise<void> {
+    const root = await this.workspaceRoot(rootArg);
+    await setCoursePresetVersion(root, version);
+  }
+
+  async updateQuestionPresets(
+    version: string, mode: UpdateMode, selected: string[] = [], rootArg?: string
+  ): Promise<{ updated: number; excludedUnknown: number; errors: string[] }> {
+    const root = await this.workspaceRoot(rootArg);
+    const found = await presetForVersion(version);
+    const bindings = await new WorkspaceStore(root).list();
+    const state = await this.state.load();
+    const account = this.session.user?.id ?? state.lastAccount ?? "offline";
+    const {targets, excludedUnknown} = await chooseUpdateTargets(
+      root, bindings, mode,
+      (b) => this.state.getActivity(state, root, b.bindingId, account), selected
+    );
+    const compiler = await this.configuredToolchain();
+    let updated = 0;
+    const errors: string[] = [];
+    for (const b of targets) {
+      try {
+        await applyPresetVersion(root, b, found, compiler);
+        updated++;
+      } catch (error) {
+        errors.push(b.problem.label + " " + b.problem.title + ": " +
+          (error instanceof Error ? error.message : String(error)));
+      }
+    }
+    return { updated, excludedUnknown, errors };
+  }
+
+  async undoQuestionPreset(bindingId: string, rootArg?: string): Promise<void> {
+    const root = await this.workspaceRoot(rootArg);
+    const found = (await new WorkspaceStore(root).list()).find(
+      b => b.bindingId === bindingId);
+    if (!found) throw new Error("题目不存在。");
+    await undoPresetUpdate(root, found);
   }
 
   async importContest(value: string, rootArg?: string, presetPath?: string,
@@ -240,7 +305,7 @@ export class StandaloneWorkflow {
     const root = await this.courseRoot(rootArg, language);
     const folder = await ensureContestDirectory(root, snapshot.id, snapshot.title);
     const workspace = new WorkspaceStore(root);
-    const preset = await this.activePreset(presetPath);
+    const preset = await this.activePreset(presetPath, root);
     const imported = await syncContest(workspace, snapshot, undefined, undefined,
       (problem) => readableProblemDirectory(root, problem, folder));
     for (const binding of imported) {
@@ -316,7 +381,7 @@ export class StandaloneWorkflow {
     const workspace = new WorkspaceStore(root);
     const binding = await workspace.import(problem,
       await readableProblemDirectory(root, problem));
-    await this.ensureScaffold(root, binding, await this.activePreset(presetPath));
+    await this.ensureScaffold(root, binding, await this.activePreset(presetPath, root));
     await this.ensureStatement(root, binding);
     await this.state.rememberProblem(root, binding.bindingId, account);
     console.log("已导入：" + binding.problem.title);
@@ -337,7 +402,7 @@ export class StandaloneWorkflow {
         (problem) => readableProblemDirectory(root, problem, folder));
       for (const binding of bindings) {
         if (!binding.unavailable)
-          await this.ensureScaffold(root, binding, await this.activePreset());
+          await this.ensureScaffold(root, binding, await this.activePreset(undefined, root));
         if (!binding.unavailable) await this.ensureStatement(root, binding);
       }
       console.log("比赛 " + id + " 已同步。");
