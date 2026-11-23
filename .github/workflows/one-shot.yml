@@ -57,11 +57,56 @@ jobs:
           test "$(printf '3 10 20 30\n' | /tmp/companion-exam/program)" = "10 20 30"
       - name: npm package dry run
         run: npm pack --dry-run
+      - name: Full-screen Ink terminal smoke (without project files)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, pty, subprocess, tempfile, select, time, shutil, fcntl, termios, struct
+          root=tempfile.mkdtemp(prefix="accoding-tty-")
+          m,s=pty.openpty()
+          fcntl.ioctl(s,termios.TIOCSWINSZ,struct.pack("HHHH",30,100,0,0))
+          env={**os.environ,"HOME":root,"XDG_CONFIG_HOME":root+"/config","TERM":"xterm-256color"}
+          proc=subprocess.Popen(["node",os.environ["GITHUB_WORKSPACE"]+"/dist/accoding.mjs"],
+            cwd=root,env=env,stdin=s,stdout=s,stderr=s)
+          os.close(s)
+          output=b""
+          try:
+            deadline=time.monotonic()+8
+            while time.monotonic()<deadline and b"Accoding Companion" not in output:
+              if select.select([m],[],[],0.1)[0]:
+                try: output+=os.read(m,65536)
+                except OSError: break
+            assert b"Accoding Companion" in output, f"TUI failed to render: {output[-1000:]!r}"
+            os.write(m,b"q")
+            assert proc.wait(timeout=5)==0, "TUI exited with an error"
+            print("Ink PTY launch/quit check passed")
+          finally:
+            if proc.poll() is None:
+              proc.terminate(); proc.wait(timeout=5)
+            os.close(m)
+            shutil.rmtree(root)
+          PY
+      - name: Install real CLI npm tarball without project dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          npm pack --ignore-scripts --pack-destination dist --silent
+          TARBALL="$(find dist -maxdepth 1 -name '*.tgz' -print -quit)"
+          test -n "$TARBALL"
+          PREFIX="$(mktemp -d)"
+          npm install --global --prefix "$PREFIX" --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE/$TARBALL"
+          test "$("$PREFIX/bin/accoding" --version)" = "0.2.0-next.0"
+          "$PREFIX/bin/accoding" --help | grep -q Accoding
+          test ! -d "$PREFIX/lib/node_modules/@annouimo/accoding-companion/node_modules"
+          echo "Isolated npm global install passed"
+
       - uses: actions/upload-artifact@v4
         with:
           name: companion-p1-node-preview
           path: |
             dist/accoding.mjs
             package-lock.json
+            dist/*.tgz
           retention-days: 10
           if-no-files-found: error

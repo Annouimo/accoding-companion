@@ -127,3 +127,19 @@ test("multiple contest directories never take over user folders", async () => {
     assert.equal(await fs.stat(path.join(root, "第五次作业")).then(x=>x.isDirectory()),true);
   } finally { await fs.rm(root, {recursive:true,force:true}); }
 });
+
+test("switching course roots restores that course's last active question", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-multi-course-"));
+  try {
+    const state = new StateStore(path.join(root, "state.json"));
+    const c = path.join(root, "course-c");
+    const cpp = path.join(root, "course-cpp");
+    await state.rememberProblem(c, "contest-1-3", "student");
+    await state.rememberProblem(cpp, "contest-2-7", "student");
+    const saved = await state.load();
+    assert.equal(state.isLastProblem(saved, c, "contest-1-3", "student"), true);
+    assert.equal(state.isLastProblem(saved, cpp, "contest-2-7", "student"), true);
+    assert.equal(state.isLastProblem(saved, c, "contest-1-1", "student"), false);
+    assert.equal(saved.recentWorkspaces?.length, 2);
+  } finally { await fs.rm(root, {recursive:true,force:true}); }
+});

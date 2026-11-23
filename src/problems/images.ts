@@ -5,7 +5,7 @@ import { hash, type Problem } from "../model";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { renderStatement } from "./statement";
 import { IMAGE_LIMIT, type ImageLoader } from "./image-fetch";
-export const IMAGE_DIRECTORY = ".better-accoding/images";
+export const IMAGE_DIRECTORY = ".accoding/images";
 const filePattern =
   /^\.better-accoding\/images\/[a-f0-9]{64}\.(png|jpg|gif|webp|svg)$/;
 const digest = (bytes: Buffer) =>

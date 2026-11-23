@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { WorkspaceStore } from "../../src/workspace/store";
 import { StandaloneWorkflow } from "../../src/standalone/workflow";
 import { StateStore, isAccepted, activityAccepted } from "../../src/standalone/state";
@@ -62,7 +63,13 @@ test("standalone C and C++ judge share the same persisted official samples", asy
       await fs.writeFile(path.join(config, entry.source), preset.code.get(entry.id)!);
     await fs.writeFile(path.join(config, "manifest.json"),
       JSON.stringify(preset.manifest));
-    await fs.writeFile(path.join(folder, "exam.h"), renderHeader(preset));
+    const expandedHeader = path.join(config, "expanded.h");
+    await fs.writeFile(expandedHeader, renderHeader(preset));
+    const relativeHeader = path.relative(folder, expandedHeader).split(path.sep).join("/");
+    const wrapper = "#ifndef ACCODING_EXAM_WRAPPER_H\\n" +
+      "#define ACCODING_EXAM_WRAPPER_H\\n" +
+      '#include "' + relativeHeader + '"\\n#endif\\n';
+    await fs.writeFile(path.join(folder, "exam.h"), wrapper);
     const source = path.join(folder, "main.c");
     // The generated compile source is nested under .accoding/generated, but
     // relative file paths must still resolve in the real problem folder.
@@ -72,11 +79,20 @@ test("standalone C and C++ judge share the same persisted official samples", asy
       'int main(void) { FILE *f = fopen("local-input.txt", "r");' +
       ' if (!f) return 2; fclose(f);' +
       ' printf("%llu\\n", exam_lcm_u64(12, 18)); return 0; }\n');
+    // The tiny visible wrapper must also work with ordinary IDE/GCC compilation,
+    // independently of the submission assembler.
+    const executable = path.join(folder, "local-program");
+    execFileSync("cc", ["-std=c99", source, "-lm", "-o", executable], { cwd:folder });
+    assert.equal(execFileSync(executable, { cwd:folder, encoding:"utf8" }), "36\n");
+
     const resolved = await app.resolve(source);
     assert.equal(await app.test(resolved), true);
     assert.ok(app.testedCode(source)?.includes("static unsigned long long exam_lcm_u64"));
     const prepared = await app.prepare(resolved);
     assert.ok(!prepared.code.includes('#include "exam.h"'));
+    await fs.writeFile(path.join(folder, "exam.h"), wrapper + "// changed");
+    await assert.rejects(app.prepare(resolved), /exam.h 已被修改/);
+    await fs.writeFile(path.join(folder, "exam.h"), wrapper);
     assert.notEqual(prepared.source, source);
     const firstBytes = await fs.readFile(prepared.source, "utf8");
     const originalBytes = await fs.readFile(source, "utf8");

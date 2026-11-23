@@ -148,7 +148,14 @@ export class StandaloneWorkflow {
     const saved = (await this.state.load()).lastWorkspace;
     const selected = await selectCourseDirectory(saved, explicit);
     const root = await this.workspaceRoot(selected);
-    await courseSettings(root, language);
+    const wasConfigured = await fileExists(path.join(root, ".accoding", "workspace.json"));
+    const config = await courseSettings(root, language);
+    // A newly created C99 workspace inherits the newest already installed
+    // preset. Never silently change the preset of an existing course.
+    if (!wasConfigured && config.language === "c") {
+      const versions = await installedPresets();
+      if (versions.length) await setCoursePresetVersion(root, versions[0].version);
+    }
     return root;
   }
 
@@ -199,12 +206,21 @@ export class StandaloneWorkflow {
     const mark = await safePath(root,
       ".accoding/initial-hashes/" + binding.bindingId + ".json");
     await fs.mkdir(path.dirname(mark), { recursive: true });
-    try {
-      await fs.writeFile(mark, JSON.stringify({
-        sourceHash: hash(await fs.readFile(sourceFor(binding, root), "utf8"))
-      }) + "\n", { encoding: "utf8", flag: "wx" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const currentCode = await fs.readFile(sourceFor(binding, root), "utf8");
+    const starter = currentCode === cTemplate || currentCode === cppTemplate ||
+      (currentCode.endsWith(cTemplate) &&
+        /^#include "[A-Za-z_][A-Za-z0-9_.-]*\.h"\n$/.test(
+          currentCode.slice(0, -cTemplate.length)));
+    // Never label a previously edited solution as "empty" simply because
+    // it does not yet have an initialization hash (old workspace / migration).
+    if (starter) {
+      try {
+        await fs.writeFile(mark, JSON.stringify({
+          sourceHash: hash(currentCode)
+        }) + "\n", { encoding: "utf8", flag: "wx" });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
     }
     const readable = path.join(folder, "题目.md");
     try {
@@ -496,6 +512,19 @@ export class StandaloneWorkflow {
           if (/^\s*#\s*include\s*"/m.test(original))
             throw new Error("检测到其他本地头文件；C99 单文件模式只支持配置中的头文件。");
         } else {
+          const headerPath = path.join(path.dirname(resolved.source),
+            preset.manifest.headerFile);
+          const implementation = path.join(resolved.root, ".accoding", "scaffold",
+            resolved.binding.bindingId, "expanded.h");
+          const relative = path.relative(path.dirname(resolved.source), implementation)
+            .split(path.sep).join("/");
+          const expected = "#ifndef ACCODING_EXAM_WRAPPER_H\n" +
+            "#define ACCODING_EXAM_WRAPPER_H\n" +
+            '#include "' + relative + '"\n#endif\n';
+          const visible = await fs.readFile(headerPath, "utf8");
+          if (visible !== expected)
+            throw new Error("exam.h 已被修改或不是本程序生成的入口文件，" +
+              "为确保本地编译和 OJ 提交一致，已停止源码展开。");
           code = assembleC(original, preset).code;
         }
       }
