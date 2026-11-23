@@ -6,13 +6,13 @@
   "private": true,
   "license": "MIT",
   "bin": {
-    "accoding": "./dist/accoding.cjs"
+    "accoding": "./dist/accoding.mjs"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "files": [
-    "dist/accoding.cjs",
+    "dist/accoding.mjs",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
@@ -33,7 +33,9 @@
     "tough-cookie": "5.1.2",
     "zod": "3.25.76",
     "katex": "0.16.22",
-    "turndown": "7.2.4"
+    "turndown": "7.2.4",
+    "ink": "7.1.1",
+    "react": "19.2.6"
   },
   "devDependencies": {
     "@types/node": "22.20.4",
@@ -43,6 +45,7 @@
     "esbuild": "0.28.2",
     "typescript": "5.9.3",
     "tsx": "4.20.6",
-    "@types/turndown": "5.0.6"
+    "@types/turndown": "5.0.6",
+    "@types/react": "^19.2.0"
   }
 }
