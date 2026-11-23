@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import fs from "node:fs/promises";
 import path from "node:path";
 import { configDirectory } from "./state";
@@ -36,6 +36,7 @@ function usage() {
     "",
     "  --root DIR                       指定工作区（初始化/同步/查询）",
     "  --preset MANIFEST                初始化时使用自定义 C99 配置",
+    "  --workspace-lang c|cpp           首次初始化课程工作区的固定语言",
     "  --lang LANGUAGE                  指定 OJ 提交语言",
     "",
     "双击启动可进入 TUI。编辑器只需要 test 和 submit 两个命令。",
@@ -73,7 +74,6 @@ async function fileMenu(
       [
         { label: "测试（通过后询问是否提交）", value: "test" },
         { label: "直接提交", value: "submit" },
-        { label: "切换 C / C++", value: "language" },
         { label: "打开代码文件夹", value: "folder" }
       ]
     );
@@ -82,8 +82,7 @@ async function fileMenu(
     else if (choice === "submit") {
       if (await confirm("确认提交当前源文件？"))
         await app.submit(problem);
-    } else if (choice === "language") problem = await app.selectSource(problem);
-    else if (choice === "folder") await openFolder(problem.source);
+    } else if (choice === "folder") await openFolder(problem.source);
   }
 }
 
@@ -141,7 +140,7 @@ async function tui(app: StandaloneWorkflow): Promise<void> {
     ));
     const currentSolved = current && activityAccepted(app.state.getActivity(
       state, current.root, current.binding.bindingId, account));
-    if (!current || currentSolved ||
+    if (!current ||
         !all.some((item) => item.binding.bindingId === current!.binding.bindingId))
       current = pending[0];
     if (!current && all.length) console.log("\n当前工作区的题目均已 AC。");
@@ -203,7 +202,6 @@ async function tui(app: StandaloneWorkflow): Promise<void> {
         { label: "查看本机数据存储位置", value: "paths" },
         { label: "设置 C / C++ 编译器", value: "compiler" },
         { label: "查看待查询的 OJ 提交", value: "status" },
-        { label: "切换 C / C++", value: "language" },
         { label: "打开当前题目的文件夹", value: "folder" },
         { label: "登录 / 切换账号", value: "login" },
         { label: "退出登录", value: "logout" }
@@ -248,7 +246,6 @@ async function tui(app: StandaloneWorkflow): Promise<void> {
         await showPaths(app);
       }
       else if (extra === "status") await app.status(undefined, true);
-      else if (extra === "language" && current) current = await app.selectSource(current);
       else if (extra === "folder" && current) await openFolder(current.source);
       else if (extra === "login") await app.login();
       else if (extra === "logout") await app.logout();
@@ -266,9 +263,9 @@ async function showPaths(app: StandaloneWorkflow): Promise<void> {
     "（Cookie 与记住的密码不放入工作区）");
   console.log("当前工作区：" + (state.lastWorkspace || "尚未选择"));
   if (state.lastWorkspace) {
-    console.log("题目元数据：" + path.join(state.lastWorkspace, ".better-accoding"));
+    console.log("题目元数据：" + path.join(state.lastWorkspace, ".accoding"));
     console.log("提交状态：" + path.join(state.lastWorkspace, ".accoding", "submissions"));
-    console.log("脚手架快照：各题目录内的 .accoding/scaffold/");
+    console.log("脚手架快照：工作区 .accoding/scaffold/");
   }
   console.log("当前默认脚手架：" + (state.presetPath || "内置示例"));
 }
@@ -281,16 +278,19 @@ async function run(): Promise<void> {
     const root = option(args, "--root");
     const preset = option(args, "--preset");
     const lang = option(args, "--lang");
+    const language = option(args, "--workspace-lang");
+    if (language && !["c", "cpp"].includes(language))
+      throw new Error("--workspace-lang 只支持 c 或 cpp。");
     const command = args[0];
     if (!command) { await tui(app); return; }
     if (command === "login") { await app.login(); return; }
     if (command === "logout") { await app.logout(); return; }
     if (command === "contest" && args[1] === "init" && args[2]) {
-      await app.importContest(args[2], root, preset);
+      await app.importContest(args[2], root, preset, language as "c" | "cpp" | undefined);
       return;
     }
     if (command === "problem" && args[1] === "init" && args[2]) {
-      await app.importProblem(args[2], root, preset);
+      await app.importProblem(args[2], root, preset, language as "c" | "cpp" | undefined);
       return;
     }
     if (command === "test" && args[1]) {

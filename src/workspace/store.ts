@@ -253,6 +253,18 @@ export class WorkspaceStore {
         if (!marker.endsWith(path.join(directory, "main.c")))
           throw new Error("Invalid problem source directory");
       }
+      const config = JSON.parse(await fs.readFile(
+        path.join(this.root, ".accoding", "workspace.json"), "utf8")) as {
+          language?: "c" | "cpp";
+        };
+      const supported = problem.languages.some((value) => {
+        const normalized = value.toLowerCase().replace(/\s+/g, "");
+        const cpp = /cpp|c\+\+|g\+\+|clang\+\+|^gnu\+\+/.test(normalized);
+        return config.language === "cpp" ? cpp :
+          !cpp && (/^c(?:\d|$)|gcc|clang|gnu99|gnu11|gnu17/.test(normalized));
+      });
+      if (problem.languages.length && !supported)
+        throw new Error("该题未提供工作区选择的编程语言，请使用其他工作区。");
       const sourceFile = await this.ensureSources(problem, directory);
       const binding: Binding = {
         schemaVersion: 2,
