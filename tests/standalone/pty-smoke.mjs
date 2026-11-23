@@ -87,3 +87,14 @@ await scenario("nested course setup -> C99 prompt -> back", async ctx => {
   assert.equal(settings.language, "c");
   ctx.send("q");
 });
+
+await scenario("login -> password -> ESC cancel -> menu", async ctx => {
+  await ctx.expect("登录 Accoding"); ctx.send("4");
+  await ctx.expect("Accoding 账号"); ctx.send("fake-student\r");
+  await ctx.expect("Accoding 密码");
+  await delay(250);
+  assert.ok(ctx.alive(), "CLI exited while waiting for password input");
+  ctx.send("\x1b");
+  await ctx.expect("登录结果"); ctx.send("\r");
+  await ctx.expect("登录 Accoding"); ctx.send("q");
+});
