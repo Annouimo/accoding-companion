@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Box, Text, render, useApp, useInput, useWindowSize } from "ink";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import type { StandaloneWorkflow, ResolvedProblem } from "./workflow";
 import { activityAccepted, type ApplicationState } from "./state";
 import { chooseUpdateTargets, type UpdateMode } from "./preset-manager";
@@ -55,6 +55,22 @@ function openFolder(source: string): Promise<void> {
   });
 }
 
+function openManual(file: string): Promise<void> {
+  if (process.platform === "darwin") {
+    return new Promise((resolve, reject) => {
+      execFile("/usr/bin/open", ["-a", "TextEdit", file], { timeout: 5000 },
+        error => error ? reject(error) : resolve());
+    });
+  }
+  const command = process.platform === "win32" ? "notepad.exe" : process.env.VISUAL?.trim();
+  if (!command) throw new Error("请设置 VISUAL 为图形文本编辑器的可执行文件。");
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [file], { detached: true, stdio: "ignore" });
+    child.once("error", reject);
+    child.once("spawn", () => { child.unref(); resolve(); });
+  });
+}
+
 function Screen({ app }: { app: StandaloneWorkflow }) {
   const { exit } = useApp();
   const { rows: height } = useWindowSize();
@@ -63,7 +79,6 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   const [page, setPage] = useState<Page>({});
   const [panel, setPanel] = useState<Panel>();
   const [input, setInput] = useState("");
-  const [crumbFocus, setCrumbFocus] = useState<number>();
   const [cursor, setCursor] = useState(0);
   const [pendingOnly, setPendingOnly] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState("正在打开工作区…");
@@ -123,7 +138,6 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     setCursor(cursors.current.get(key) ?? defaultCursor);
     setPage(next);
     setPanel(undefined);
-    setCrumbFocus(undefined);
     setMessage("");
     setShowDetails(false);
   }
@@ -149,7 +163,6 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   function open(next: Panel) {
     setInput("");
     setPanel(next);
-    setCrumbFocus(undefined);
   }
 
   function pick(title: string, choices: string[]): Promise<string | undefined> {
@@ -390,6 +403,18 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   const passed = problem && Boolean(app.testedCode(problem.source));
   const result = problem && testResult[problem.source];
   const onlyPending = group && pendingOnly[pageKey];
+
+  function showManual() {
+    void run("正在打开手册…", async () => {
+      if (!root) throw new Error("请先配置 C99 课程工作区。");
+      const file = await app.presetManualPath(root, problem);
+      try { await openManual(file); }
+      catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error("无法打开手册。" + reason + "\n本地文件 " + file);
+      }
+    });
+  }
   const entries: Row[] = problem ? [
     ...(passed ? [{ id: "submit", label: "提交本次通过的版本", run: () => submit(true) }] : []),
     { id: "test", label: passed ? "重新运行样例" : "运行样例", run: test },
@@ -449,23 +474,12 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     }
     if (key.escape) {
       if (panel) { panel.cancel?.(); setPanel(undefined); }
-      else if (crumbFocus !== undefined) setCrumbFocus(undefined);
       else parent();
       return;
     }
     if (!panel && !key.ctrl && char === "q") { void quit(); return; }
-    if (!panel && key.tab) {
-      setCrumbFocus(crumbFocus === undefined ? Math.max(0, crumbLabels.length - 2) : undefined);
-      return;
-    }
-    if (!panel && crumbFocus !== undefined) {
-      if (key.leftArrow) setCrumbFocus(Math.max(0, crumbFocus - 1));
-      else if (key.rightArrow) setCrumbFocus(Math.min(crumbLabels.length - 1, crumbFocus + 1));
-      else if (key.return) {
-        if (crumbFocus === 0 && group) go({}, groups.indexOf(group));
-        else if (crumbFocus === 1 && problem) parent();
-        else setCrumbFocus(undefined);
-      }
+    if (!panel && !key.ctrl && !key.meta && char.toLowerCase() === "h") {
+      showManual();
       return;
     }
     if (key.upArrow || key.downArrow)
@@ -480,8 +494,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     <Box flexDirection="column" paddingX={1}>
       <Box>
         {crumbLabels.map((label, index) => <Text key={index}>
-          {index ? " › " : ""}<Text bold={index === crumbLabels.length - 1}
-            inverse={crumbFocus === index}>{label}</Text>
+          {index ? " › " : ""}<Text bold={index === crumbLabels.length - 1}>{label}</Text>
         </Text>)}
       </Box>
       {!panel && problem ? <Text dimColor>
@@ -497,14 +510,13 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       {panel && "rows" in panel && panel.note ? <Text dimColor>{panel.note}</Text> : null}
       {panel && "input" in panel ? <Text color="cyan">{panel.secret ? "•".repeat([...input].length) : input}▏</Text> : null}
       {list.slice(start, start + visibleCount).map((row, index) =>
-        <Text key={row.id} color={crumbFocus === undefined && selected === start + index ? "cyan" : undefined}>
-          {crumbFocus === undefined && selected === start + index ? "❯ " : "  "}{row.label}
+        <Text key={row.id} color={selected === start + index ? "cyan" : undefined}>
+          {selected === start + index ? "❯ " : "  "}{row.label}
         </Text>)}
       {!busy && list.length > visibleCount ? <Text dimColor>{selected + 1}/{list.length}</Text> : null}
       <Text dimColor>{panel && "input" in panel ? "Enter 确定 · Esc 取消" :
-        crumbFocus !== undefined ? "← → 选择路径 · Enter 跳转 · Tab 回到列表" :
         panel ? "↑ ↓ 选择 · Enter 确定 · Esc 返回" :
-        "↑ ↓ 选择 · Enter 打开 · Tab 路径 · " + (group ? "Esc 返回 · " : "") + "Q 退出"}</Text>
+        "↑ ↓ 选择 · Enter 打开 · " + (group ? "Esc 返回 · " : "") + "H 打开手册 · Q 退出"}</Text>
     </Box>
   );
 }

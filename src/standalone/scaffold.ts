@@ -23,7 +23,10 @@ export interface LoadedPreset {
   manifest: PresetManifest;
   code: Map<string, string>;
   order: string[];
+  manual?: string;
 }
+
+export const PRESET_MANUAL = "manual.zh-CN.md";
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z_0-9]*$/;
 const HEADER = /^[A-Za-z_][A-Za-z_0-9.-]*\.h$/;
@@ -119,6 +122,13 @@ export async function loadPreset(manifestPath: string): Promise<LoadedPreset> {
     order.push(id);
   }
   for (const item of components) visit(item.id);
+  const manualPath = path.join(base, PRESET_MANUAL);
+  const manual = await fs.lstat(manualPath)
+    .then(stat => stat.isFile() ? fs.readFile(manualPath, "utf8") : undefined)
+    .catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return undefined;
+    });
   return {
     manifest: {
       schemaVersion: 1,
@@ -130,7 +140,8 @@ export async function loadPreset(manifestPath: string): Promise<LoadedPreset> {
       components
     },
     code,
-    order
+    order,
+    manual
   };
 }
 

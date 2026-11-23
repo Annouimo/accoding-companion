@@ -18,10 +18,12 @@ await fs.access(bundle);
 
 async function scenario(name, run) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-pty-"));
+  const editor = path.join(home, "test-editor");
+  await fs.writeFile(editor, '#!/bin/sh\nprintf "%s" "$1" > "$HOME/opened-manual"\n', { mode: 0o700 });
   const env = { ...process.env, HOME: home,
     XDG_CONFIG_HOME: path.join(home, ".config"),
     XDG_DATA_HOME: path.join(home, ".local", "share"),
-    CI: "false", TERM: "xterm-256color", NO_COLOR: "1" };
+    CI: "false", TERM: "xterm-256color", NO_COLOR: "1", VISUAL: editor };
   const command = JSON.stringify(process.execPath) + " " + JSON.stringify(bundle);
   const child = spawn("script", ["-q", "-e", "-c", command, "/dev/null"],
     { env, stdio: ["pipe", "pipe", "pipe"] });
@@ -81,6 +83,23 @@ await scenario("nested course setup saves a C99 workspace", async ctx => {
   await ctx.expect("test-course");
   const settings = JSON.parse(await fs.readFile(path.join(directory, ".accoding", "workspace.json"), "utf8"));
   assert.equal(settings.language, "c");
+  await ctx.expect("H 打开手册");
+  settings.presetVersion = "0.6.6";
+  await fs.writeFile(path.join(directory, ".accoding", "workspace.json"), JSON.stringify(settings));
+  const snapshot = path.join(directory, ".accoding", "presets", settings.presetVersion);
+  await fs.mkdir(snapshot, { recursive: true });
+  const manual = path.join(snapshot, "manual.zh-CN.md");
+  await fs.writeFile(manual, "# 离线手册\n");
+  ctx.send("\t");
+  await delay(100);
+  ctx.send("h");
+  const opened = path.join(ctx.home, "opened-manual");
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (await fs.stat(opened).then(stat => stat.size > 0, () => false)) break;
+    await delay(40);
+  }
+  assert.equal(await fs.readFile(opened, "utf8"), manual);
   ctx.send("q");
 });
 
