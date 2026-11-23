@@ -48,12 +48,13 @@ jobs:
           int main(void) {
               int n=read_int(), a[4];
               read_ints(a,n);
-              print_ints(a,n," ","\\n");
+              print_ints(a,n," ","\n");
               return 0;
           }
           EOF
           node --import tsx src/standalone/cli.ts scaffold prepare /tmp/companion-exam/main.c
-          test "$(printf '3 10 20 30\\n' | /tmp/companion-exam/.accoding/check-sentinel 2>/dev/null || true)" = "" || true
+          cc -std=c99 -Wall -Wextra /tmp/companion-exam/.accoding/submit.c -lm -o /tmp/companion-exam/program
+          test "$(printf '3 10 20 30\n' | /tmp/companion-exam/program)" = "10 20 30"
       - name: npm package dry run
         run: npm pack --dry-run
       - uses: actions/upload-artifact@v4

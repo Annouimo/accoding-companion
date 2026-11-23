@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import fs from "node:fs/promises";
 declare const __ACCODING_VERSION__: string;
 import path from "node:path";
