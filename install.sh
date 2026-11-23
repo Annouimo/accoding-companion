@@ -5,12 +5,15 @@ CLI="@annouimo/accoding-companion"
 PRESET="@annouimo/c-exam-kit-preset"
 mode=both
 yes=0
+channel=latest
 for arg in "$@"; do
   case "$arg" in
     --software-only) mode=software ;;
     --preset-only) mode=preset ;;
     --yes) yes=1 ;;
-    --help|-h) echo "Usage: install.sh [--software-only|--preset-only] [--yes]"; exit 0 ;;
+    --next) channel=next ;;
+    --latest) channel=latest ;;
+    --help|-h) echo "Usage: install.sh [--software-only|--preset-only] [--latest|--next] [--yes]"; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -44,6 +47,7 @@ if [[ "$valid_node" == 0 ]]; then
   exit 2
 fi
 echo "Node $(node --version), npm $(npm --version): ready"
+echo "Release channel: $channel"
 
 if [[ "$(uname -s)" == Darwin ]]; then
   data_root="$HOME/Library/Application Support/Accoding Companion"
@@ -53,7 +57,7 @@ else
   data_root="$data_home/accoding-companion"
 fi
 remote_version() {
-  npm view "$1" version --fetch-retries=1 2>/dev/null | tail -1
+  npm view "$1@$channel" version --fetch-retries=1 2>/dev/null | tail -1
 }
 local_cli() {
   npm ls -g --depth=0 --json 2>/dev/null | node -e '
