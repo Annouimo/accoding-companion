@@ -85,7 +85,8 @@ export async function readableProblemDirectory(
     ? readableName(problem.label, "题")
     : "题目";
   const candidate = readableName(label + "-" + problem.title);
-  const prefix = parentDirectory || (problem.target.kind === "problemset" ? "独立题目" : "");
+  const prefix = parentDirectory || (problem.target.kind === "problemset"
+    ? await ensureIndependentDirectory(root) : "");
   if (!prefix) throw new Error("必须先为比赛建立专属文件夹。");
   await fs.mkdir(path.join(root, prefix), { recursive: true });
   const relative = (name: string) => path.join(prefix, name);
@@ -201,4 +202,34 @@ export async function ensureContestDirectory(
     }
   }
   throw new Error("已有同名目录，请重命名其中一个目录后重试；不会覆盖用户文件夹。");
+}
+
+/** Keep imported standalone exercises separate from a user's own similarly named folder. */
+export async function ensureIndependentDirectory(root: string): Promise<string> {
+  const marker = path.join(root, ".accoding", "independent-folder.json");
+  try {
+    const parsed = JSON.parse(await fs.readFile(marker, "utf8")) as {
+      kind?: string; directory?: string;
+    };
+    if (parsed.kind !== "independent" || !parsed.directory ||
+        path.basename(parsed.directory) !== parsed.directory)
+      throw new Error("独立题目录索引损坏，未修改任何文件。");
+    return parsed.directory;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  for (const candidate of ["独立题目", "独立题目-Accoding"]) {
+    try {
+      await fs.mkdir(path.join(root, candidate));
+      await fs.mkdir(path.dirname(marker), { recursive: true });
+      await fs.writeFile(marker, JSON.stringify({
+        schemaVersion: 1, kind: "independent", directory: candidate
+      }) + "\n", { flag: "wx" });
+      return candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (await exists(marker)) return ensureIndependentDirectory(root);
+    }
+  }
+  throw new Error("独立题目目录已被占用，请先手动选择其他课程工作区。");
 }
