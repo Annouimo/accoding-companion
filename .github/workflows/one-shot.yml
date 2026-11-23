@@ -1,0 +1,39 @@
+name: Companion one-off Node check
+on:
+  push:
+    branches: [build/companion-p1-one-shot]
+permissions:
+  contents: read
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install CLI dependencies
+        run: npm install --no-audit --no-fund
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Standalone regression
+        run: npm test
+      - name: Build Node CLI
+        run: npm run build
+      - name: CLI without node_modules
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/companion-smoke
+          cp dist/accoding.cjs /tmp/companion-smoke/accoding.cjs
+          (cd /tmp/companion-smoke && node ./accoding.cjs --help | grep -q Accoding)
+      - name: npm package dry run
+        run: npm pack --dry-run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-p1-node-preview
+          path: |
+            dist/accoding.cjs
+            package-lock.json
+          retention-days: 10
+          if-no-files-found: error
