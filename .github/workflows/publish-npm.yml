@@ -1,9 +1,6 @@
 name: Publish npm preview (manual)
 
 on:
-  push:
-    branches:
-      - feat/lean-workspace-navigation
   workflow_dispatch:
     inputs:
       mode:
@@ -43,7 +40,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Verify the intended source branch and prerelease version
         env:
-          EXPECTED_VERSION: ${{ inputs.expected_version || '0.2.0-next.2' }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/feat/lean-workspace-navigation"
@@ -66,17 +63,6 @@ jobs:
           npm run build
           mkdir -p "$RUNNER_TEMP/npm-dist"
           npm pack --pack-destination "$RUNNER_TEMP/npm-dist"
-      - name: Verify published npm preview tags and install both packages
-        if: ${{ github.event_name == 'push' && github.event.head_commit.message == 'Verify published npm preview tags' }}
-        run: |
-          set -euo pipefail
-          npm view @annouimo/c-exam-kit-preset dist-tags --json --prefer-online
-          npm view @annouimo/accoding-companion dist-tags --json --prefer-online
-          test "$(npm view @annouimo/c-exam-kit-preset@next version --prefer-online)" = "0.6.4-next.1"
-          test "$(npm view @annouimo/accoding-companion@next version --prefer-online)" = "0.2.0-next.2"
-          npm install --no-audit --no-fund --prefix "$RUNNER_TEMP/preview-install" @annouimo/c-exam-kit-preset@next @annouimo/accoding-companion@next
-          "$RUNNER_TEMP/preview-install/node_modules/.bin/accoding" --version
-          node -e 'const p=require(process.argv[1]); if(p.components.length!==287)throw Error("Unexpected component count"); console.log(p.components.length,"preset components installed")' "$RUNNER_TEMP/preview-install/node_modules/@annouimo/c-exam-kit-preset/preset/manifest.json"
       - uses: actions/upload-artifact@v4
         with:
           name: npm-preview-tarball
@@ -87,7 +73,7 @@ jobs:
   publish:
     name: Publish Accoding Companion CLI to npm next
     needs: pack
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'PUBLISH_NEXT') || (github.event_name == 'push' && github.event.head_commit.message == 'Release npm next 0.2.0-next.2') }}
+    if: ${{ inputs.mode == 'PUBLISH_NEXT' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
