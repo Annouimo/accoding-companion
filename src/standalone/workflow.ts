@@ -13,12 +13,13 @@ import { sendSubmission } from "../submissions/send";
 import { SubmissionStore, isPending } from "../submissions/store";
 import { monitorSubmissions } from "../submissions/monitor";
 import { bindingId, hash, parseImport, type Binding, type Problem, type Target } from "../model";
-import { assembleC, initializeHeader, loadPreset, type LoadedPreset } from "./scaffold";
+import { assembleC, renderHeader, loadPreset, type LoadedPreset } from "./scaffold";
+import { readableStatement } from "../problems/statement";
 import { builtinPreset } from "./generated-preset";
 import { StateStore, isAccepted, activityAccepted } from "./state";
 import { credentialsBackend } from "./secrets";
 import { ask, confirm, interactive, select, password } from "./terminal";
-import { selectWorkspaceDirectory, initializeFriendlyLayout, isFriendlyWorkspace, readableProblemDirectory, droppedPath } from "./workspaces";
+import { selectCourseDirectory, courseSettings, ensureContestDirectory, isFriendlyWorkspace, readableProblemDirectory, droppedPath } from "./workspaces";
 
 export interface ResolvedProblem {
   root: string;
@@ -59,7 +60,7 @@ async function fileExists(file: string): Promise<boolean> {
 }
 
 async function savePresetSnapshot(directory: string, preset: LoadedPreset): Promise<void> {
-  const location = path.join(directory, ".accoding", "scaffold");
+  const location = directory;
   const manifest = path.join(location, "manifest.json");
   if (await fileExists(manifest)) return;
   await fs.mkdir(location, { recursive: true });
@@ -140,6 +141,14 @@ export class StandaloneWorkflow {
     console.log("已退出登录并清除已保存的会话凭据。");
   }
 
+  async courseRoot(explicit?: string, language?: "c" | "cpp"): Promise<string> {
+    const saved = (await this.state.load()).lastWorkspace;
+    const selected = await selectCourseDirectory(saved, explicit);
+    const root = await this.workspaceRoot(selected);
+    await courseSettings(root, language);
+    return root;
+  }
+
   async workspaceRoot(explicit?: string): Promise<string> {
     const saved = await this.state.load();
     const root = droppedPath(explicit || saved.lastWorkspace ||
@@ -150,30 +159,48 @@ export class StandaloneWorkflow {
   }
 
   private async ensureScaffold(root: string, binding: Binding, preset: LoadedPreset): Promise<void> {
-    const fallback = defaultSourceFiles(binding.problem.target);
-    const sourceDir = binding.problemDirectory ?? path.posix.dirname(fallback.c);
-    const source = localPath(root, path.posix.join(sourceDir, "main.c"));
-    const directory = path.dirname(source);
-    const existingPreset = path.join(directory, ".accoding", "scaffold", "manifest.json");
-    const chosen = (await fileExists(existingPreset))
-      ? await loadPreset(existingPreset) : preset;
-    await savePresetSnapshot(directory, chosen);
+    // C++ workspaces never receive the C99 exam library.
+    const config = await courseSettings(root);
+    if (config.language !== "c") return;
+    const folder = path.dirname(sourceFor(binding, root));
+    const location = path.join(root, ".accoding", "scaffold", binding.bindingId);
+    const existing = path.join(location, "manifest.json");
+    const chosen = (await fileExists(existing)) ? await loadPreset(existing) : preset;
+    await savePresetSnapshot(location, chosen);
+    const implementation = path.join(location, "expanded.h");
     try {
-      await initializeHeader(directory, chosen);
+      await fs.writeFile(implementation, renderHeader(chosen), { encoding: "utf8", flag: "wx" });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
-    // Only touch a newly imported, untouched default program.
-    const existing = await fs.readFile(source, "utf8");
-    if (existing === cTemplate)
-      await fs.writeFile(source, '#include "' + chosen.manifest.headerFile + '"\n' + existing,
-        "utf8");
-    // Do not bring the original VS Code extension\'s large competitive template
-    // into the minimal standalone C++ workflow.
-    const cpp = localPath(root, path.posix.join(sourceDir, "main.cpp"));
-    if (await fs.readFile(cpp, "utf8") === cppTemplate)
-      await fs.writeFile(cpp,
-        "#include <iostream>\n\nint main() {\n    return 0;\n}\n", "utf8");
+    // A tiny user-visible header keeps ordinary IDE compilation working.
+    const relative = path.relative(folder, implementation).split(path.sep).join("/");
+    const wrapper = "#ifndef ACCODING_EXAM_WRAPPER_H\n#define ACCODING_EXAM_WRAPPER_H\n" +
+      '#include "' + relative + '"\n#endif\n';
+    try {
+      await fs.writeFile(path.join(folder, chosen.manifest.headerFile),
+        wrapper, { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const source = sourceFor(binding, root);
+    const original = await fs.readFile(source, "utf8");
+    if (original === cTemplate) {
+      await fs.writeFile(source,
+        '#include "' + chosen.manifest.headerFile + '"\n' + original, "utf8");
+    }
+  }
+
+  private async ensureStatement(root: string, binding: Binding): Promise<void> {
+    const folder = path.dirname(sourceFor(binding, root));
+    const readable = path.join(folder, "题目.md");
+    try {
+      await fs.writeFile(readable, readableStatement(binding.problem),
+        { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      // User-owned notes are never overwritten, including on a remote sync.
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
   }
 
   async configuredToolchain(): Promise<Toolchain> {
@@ -202,21 +229,25 @@ export class StandaloneWorkflow {
     await this.state.rememberPreset(selected);
   }
 
-  async importContest(value: string, rootArg?: string, presetPath?: string): Promise<void> {
+  async importContest(value: string, rootArg?: string, presetPath?: string,
+    language?: "c" | "cpp"): Promise<void> {
     const account = await this.account();
     if (!account) throw new Error("未登录");
     const input = parseImport(value, "contest");
     if (input.kind !== "contest") throw new Error("请提供比赛 ID 或比赛链接。");
     const snapshot = await fetchContestSnapshotForImport(this.session.client, input.id,
       (line) => console.log(line));
-    const picked = await selectWorkspaceDirectory(snapshot.title, rootArg);
-    const root = await this.workspaceRoot(picked);
-    const friendly = await initializeFriendlyLayout(root);
+    const root = await this.courseRoot(rootArg, language);
+    const folder = await ensureContestDirectory(root, snapshot.id, snapshot.title);
     const workspace = new WorkspaceStore(root);
     const preset = await this.activePreset(presetPath);
     const imported = await syncContest(workspace, snapshot, undefined, undefined,
-      friendly ? (problem) => readableProblemDirectory(root, problem) : undefined);
-    for (const binding of imported) await this.ensureScaffold(root, binding, preset);
+      (problem) => readableProblemDirectory(root, problem, folder));
+    for (const binding of imported) {
+      if (binding.unavailable) continue;
+      await this.ensureScaffold(root, binding, preset);
+      await this.ensureStatement(root, binding);
+    }
     // Sync verdicts before choosing a default, so known AC tasks are not selected.
     await this.refreshContestVerdicts(root, snapshot.id, account, snapshot.problems);
     const state = await this.state.load();
@@ -266,7 +297,8 @@ export class StandaloneWorkflow {
     }
   }
 
-  async importProblem(value: string, rootArg?: string, presetPath?: string): Promise<void> {
+  async importProblem(value: string, rootArg?: string, presetPath?: string,
+    language?: "c" | "cpp"): Promise<void> {
     const account = await this.account();
     if (!account) throw new Error("未登录");
     const input = parseImport(value, "problemset");
@@ -280,13 +312,12 @@ export class StandaloneWorkflow {
         throw error;
       problem = await new ProblemsetAdapter(this.session.client.adminReader()).fetch(input.id);
     }
-    const picked = await selectWorkspaceDirectory(problem.title, rootArg);
-    const root = await this.workspaceRoot(picked);
-    const friendly = await initializeFriendlyLayout(root);
+    const root = await this.courseRoot(rootArg, language);
     const workspace = new WorkspaceStore(root);
     const binding = await workspace.import(problem,
-      friendly ? await readableProblemDirectory(root, problem) : undefined);
+      await readableProblemDirectory(root, problem));
     await this.ensureScaffold(root, binding, await this.activePreset(presetPath));
+    await this.ensureStatement(root, binding);
     await this.state.rememberProblem(root, binding.bindingId, account);
     console.log("已导入：" + binding.problem.title);
     console.log("目录：" + path.dirname(sourceFor(binding, root)));
@@ -301,12 +332,13 @@ export class StandaloneWorkflow {
       b.problem.target.kind === "contest" ? [b.problem.target.contestId] : []))];
     for (const id of contestIds) {
       const snapshot = await fetchContestSnapshotForImport(this.session.client, id);
-      const friendly = await isFriendlyWorkspace(root);
+      const folder = await ensureContestDirectory(root, snapshot.id, snapshot.title);
       const bindings = await syncContest(workspace, snapshot, undefined, undefined,
-        friendly ? (problem) => readableProblemDirectory(root, problem) : undefined);
+        (problem) => readableProblemDirectory(root, problem, folder));
       for (const binding of bindings) {
         if (!binding.unavailable)
           await this.ensureScaffold(root, binding, await this.activePreset());
+        if (!binding.unavailable) await this.ensureStatement(root, binding);
       }
       console.log("比赛 " + id + " 已同步。");
     }
@@ -318,6 +350,7 @@ export class StandaloneWorkflow {
           : this.session.client
       ).fetch(binding.problem.target.problemId);
       await workspace.sync(binding, problem);
+      await this.ensureStatement(root, binding);
       console.log("题号 " + binding.problem.target.problemId + " 已同步。");
     }
   }
@@ -330,7 +363,7 @@ export class StandaloneWorkflow {
     if (!(await fileExists(source))) throw new Error("找不到源文件：" + source);
     let directory = path.dirname(source);
     while (true) {
-      const index = path.join(directory, ".better-accoding", "bindings");
+      const index = path.join(directory, ".accoding", "bindings");
       if (await fileExists(index)) {
         const workspace = new WorkspaceStore(directory);
         const bindings = await workspace.list();
@@ -340,8 +373,7 @@ export class StandaloneWorkflow {
           const sourceDirectory = localPath(directory, folder);
           if (path.dirname(source) !== sourceDirectory) return false;
           // Only managed entrypoints, or an explicitly bound custom source, can be submitted.
-          return ["main.c", "main.cpp"].includes(path.basename(source)) ||
-            path.resolve(directory, item.sourceFile) === source;
+          return path.resolve(directory, item.sourceFile) === source;
         });
         if (!binding) throw new Error("当前文件不属于已初始化的题目。");
         if (binding.unavailable) throw new Error("题目已从比赛移除，暂不能提交。");
@@ -360,8 +392,7 @@ export class StandaloneWorkflow {
    */
   private async freezeSource(resolved: ResolvedProblem, code: string): Promise<string> {
     const ext = path.extname(resolved.source).toLowerCase();
-    const relative = path.relative(resolved.root, path.join(
-      path.dirname(resolved.source), ".accoding", "generated", hash(code) + ext));
+    const relative = path.join(".accoding", "snapshots", hash(code) + ext);
     const location = await safePath(resolved.root, relative);
     await fs.mkdir(path.dirname(location), { recursive: true });
     try {
@@ -386,8 +417,8 @@ export class StandaloneWorkflow {
       if (/^\s*#\s*include\s*"/m.test(original))
         throw new Error("C++ 第一版不支持自动展开自定义头文件，请先合并为单文件。");
     } else {
-      const presetFile = path.join(path.dirname(resolved.source),
-        ".accoding", "scaffold", "manifest.json");
+      const presetFile = path.join(resolved.root, ".accoding", "scaffold",
+        resolved.binding.bindingId, "manifest.json");
       if (!(await fileExists(presetFile))) {
         if (/^\s*#\s*include\s*"/m.test(original))
           throw new Error("使用了本地头文件，但未找到可展开的脚手架配置快照。");
