@@ -37,7 +37,7 @@ func compilerFlags(dir string) []string {
 	return []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH")}
 }
 
-func checkCompiler(directory, executable string, probe compilerProbe) error {
+func checkCompiler(directory, executable string, probe compilerProbe, managed bool) error {
 	input := filepath.Join(directory, probe.filename)
 	if err := os.WriteFile(input, []byte(probe.source), 0600); err != nil {
 		return err
@@ -45,8 +45,13 @@ func checkCompiler(directory, executable string, probe compilerProbe) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	output := filepath.Join(directory, "probe.exe")
-	cmd := exec.CommandContext(ctx, executable, "-std="+probe.standard, "-iquote", ".",
-		probe.filename, "-o", "probe.exe")
+	args := []string{"-std=" + probe.standard, "-iquote", "."}
+	if managed {
+		// The Windows linker uses the system code page for the LTO plugin path.
+		// These small standalone programs do not use link-time optimization.
+		args = append(args, "-fno-use-linker-plugin", "-B"+filepath.Dir(executable)+string(filepath.Separator))
+	}
+	cmd := exec.CommandContext(ctx, executable, append(args, probe.filename, "-o", "probe.exe")...)
 	cmd.Dir = directory
 	cmd.Env = append(os.Environ(), compilerFlags(filepath.Dir(executable))...)
 	if data, err := cmd.CombinedOutput(); err != nil {
@@ -92,7 +97,7 @@ func checkWindowsCompilers(root string) error {
 			if candidate == "" {
 				continue
 			}
-			if executable, err := exec.LookPath(candidate); err == nil && checkCompiler(testDirectory, executable, probe) == nil {
+			if executable, err := exec.LookPath(candidate); err == nil && checkCompiler(testDirectory, executable, probe, false) == nil {
 				found = true
 				break
 			}
@@ -131,7 +136,7 @@ func installWindowsCompiler(root, testDirectory string) error {
 	}
 	for _, probe := range compilerProbes {
 		executable := filepath.Join(extracted, "mingw64", "bin", probe.command+".exe")
-		if err := checkCompiler(testDirectory, executable, probe); err != nil {
+		if err := checkCompiler(testDirectory, executable, probe, true); err != nil {
 			return err
 		}
 	}

@@ -44,13 +44,17 @@ export type SampleTestReport =
 export function toolchain(config: { c?: string; cpp?: string } = {}): Toolchain {
   const c = process.env.ACCODING_CC || process.env.CC || config.c;
   const cpp = process.env.ACCODING_CXX || process.env.CXX || config.cpp;
+  const managedC = !c && process.env.ACCODING_MANAGED_CC;
+  const managedCpp = !cpp && process.env.ACCODING_MANAGED_CXX;
+  const portableFlags = (executable: string | false | undefined) => executable
+    ? ["-fno-use-linker-plugin", "-B" + path.dirname(executable) + path.sep] : [];
   return {
-    c: c || process.env.ACCODING_MANAGED_CC ||
+    c: c || managedC ||
       (process.platform === "win32" ? "gcc" : "cc"),
-    cpp: cpp || process.env.ACCODING_MANAGED_CXX ||
+    cpp: cpp || managedCpp ||
       (process.platform === "win32" ? "g++" : "c++"),
-    cArgs: ["-std=" + languages.c.standard, "-O2", "-Wall", "-Wextra", "-Wno-unused-function"],
-    cppArgs: ["-std=" + languages.cpp.standard, "-O2", "-Wall", "-Wextra"],
+    cArgs: ["-std=" + languages.c.standard, "-O2", "-Wall", "-Wextra", "-Wno-unused-function", ...portableFlags(managedC)],
+    cppArgs: ["-std=" + languages.cpp.standard, "-O2", "-Wall", "-Wextra", ...portableFlags(managedCpp)],
     cLinkArgs: ["-lm"],
     timeoutMs: 2000,
     outputLimit: 4 * 1024 * 1024

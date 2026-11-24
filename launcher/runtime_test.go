@@ -72,7 +72,7 @@ func TestManagedGCCFromChinesePath(t *testing.T) {
 	}
 	for _, probe := range compilerProbes {
 		executable := filepath.Join(managedCompilerBin(root), probe.command+".exe")
-		if err := checkCompiler(root, executable, probe); err != nil {
+		if err := checkCompiler(root, executable, probe, true); err != nil {
 			t.Fatal(err)
 		}
 	}
