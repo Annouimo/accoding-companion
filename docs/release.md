@@ -6,14 +6,14 @@
 
 - `@annouimo/accoding-companion`：Node.js 22.12+ 的单文件 CLI，构建期依赖打入 JS 文件。
 - `@annouimo/c-exam-kit-preset`：独立仓库维护的纯数据包。0.6.7 起使用内联组件的 `preset/manifest.json` 和 `preset/reference.json`；旧工作区的 v1 资源与 Markdown 手册仍受支持。
-- GitHub Release：Windows x64/ARM64、macOS x64/ARM64 原生启动器 ZIP，随包附离线 HTML 使用说明。启动器首次安装时检查 Node.js；Windows x64 在缺少可用 C/C++ 编译器时安装受管理的便携 GCC。
+- GitHub Release：Windows x64/ARM64、macOS x64/ARM64 原生启动器 ZIP，随包附离线 HTML 使用说明。启动器只负责 Node.js 和两个 npm 软件包，不安装或检查编译器。
 
 主程序和资源包分别维护版本号。仅更新函数时不必提升 Companion 版本，但改变资源格式时必须先发布兼容的 Companion。用户从启动器检查更新；TUI 不自动修改课程资源。
 
 ## 发布前验收
 
 - CLI：`npm run typecheck`、`npm test`、`npm run build`、真实 TTY smoke test。
-- 启动器：macOS、Windows、Linux 上的 Go 测试与 launcher smoke test。Windows x64 必须真实下载固定版本 GCC，在含中文和空格的目录中分别编译、链接、运行 C/C++ 程序。Node.js 安装也需覆盖中文目录。
+- 启动器：macOS、Windows、Linux 上的 Go 测试与 launcher smoke test。Node.js 安装覆盖中文目录。单独使用外部 GCC 验证含中文和空格的工作区中 C/C++ 编译、链接、运行，以及缺少编译器时的提示；不要求启动器下载 GCC。
 - ZIP：四个平台/架构均成功构建，包含对应原生启动器、版本匹配的 HTML 和图片、许可文件。
 - 工作区：测试和 OJ 提交复用同一份精简后的源码；已改动或无法判断状态的题目不自动升级。旧数据迁移只复制，冲突不覆盖。
 - 实机：macOS Apple Silicon、Windows 11、中文终端、首次安装、重复运行、独立升级、断网启动、卸载、真实 Accoding 登录与提交。自动化测试不能代替账号实测。

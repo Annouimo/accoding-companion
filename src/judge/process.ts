@@ -16,6 +16,7 @@ export function runProcess(
     timeoutMs: number;
     outputLimit: number;
     signal?: AbortSignal;
+    env?: NodeJS.ProcessEnv;
   },
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
@@ -37,6 +38,7 @@ export function runProcess(
     let settled = false;
     const child = spawn(command, args, {
       cwd: options.cwd,
+      env: options.env,
       shell: false,
       detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
@@ -88,11 +90,11 @@ export function runProcess(
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", cancel);
     };
-    child.on("error", () => {
+    child.on("error", (error) => {
       if (settled) return;
       settled = true;
       cleanup();
-      reject(new Error(`无法启动 ${command}，请检查工具链配置。`));
+      reject(new Error(`无法启动 ${command}，请检查工具链配置。`, { cause: error }));
     });
     // Killing the group when the leader exits also closes inherited pipes of descendants.
     child.on("exit", kill);

@@ -44,19 +44,13 @@ export type SampleTestReport =
 export function toolchain(config: { c?: string; cpp?: string } = {}): Toolchain {
   const c = process.env.ACCODING_CC || process.env.CC || config.c;
   const cpp = process.env.ACCODING_CXX || process.env.CXX || config.cpp;
-  const managedC = !c && process.env.ACCODING_MANAGED_CC;
-  const managedCpp = !cpp && process.env.ACCODING_MANAGED_CXX;
-  const portableFlags = (executable: string | false | undefined) => executable
-    ? (process.env.ACCODING_MANAGED_GCC_PREFIXES ?? "").split(path.delimiter).filter(Boolean)
-      .flatMap(prefix => ["-B" + prefix + path.sep]).concat("-fno-use-linker-plugin")
-    : [];
   return {
-    c: c || managedC ||
+    c: c ||
       (process.platform === "win32" ? "gcc" : "cc"),
-    cpp: cpp || managedCpp ||
+    cpp: cpp ||
       (process.platform === "win32" ? "g++" : "c++"),
-    cArgs: ["-std=" + languages.c.standard, "-O2", "-Wall", "-Wextra", "-Wno-unused-function", ...portableFlags(managedC)],
-    cppArgs: ["-std=" + languages.cpp.standard, "-O2", "-Wall", "-Wextra", ...portableFlags(managedCpp)],
+    cArgs: ["-std=" + languages.c.standard, "-O2", "-Wall", "-Wextra", "-Wno-unused-function"],
+    cppArgs: ["-std=" + languages.cpp.standard, "-O2", "-Wall", "-Wextra"],
     cLinkArgs: ["-lm"],
     timeoutMs: 2000,
     outputLimit: 4 * 1024 * 1024
@@ -217,7 +211,7 @@ export class StandaloneWorkflow {
   async setCompiler(language: "c" | "cpp", executable: string): Promise<void> {
     await this.state.rememberCompiler(language, executable.trim());
     console.log((language === "c" ? "C" : "C++") +
-      " 编译器：" + (executable.trim() || "自动检测"));
+      " 编译器：" + (executable.trim() || "系统默认"));
   }
 
   async presetManualPath(root: string, problem?: ResolvedProblem): Promise<string> {

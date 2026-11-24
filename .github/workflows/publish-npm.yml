@@ -99,7 +99,6 @@ jobs:
         working-directory: launcher
         env:
           ACCODING_TEST_NODE_DOWNLOAD: "1"
-          ACCODING_TEST_GCC_DOWNLOAD: "1"
         run: go test -v ./...
 
   publish:
