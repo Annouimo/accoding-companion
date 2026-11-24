@@ -37,6 +37,27 @@ func compilerFlags(dir string) []string {
 	return []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH")}
 }
 
+// GCC's -B selects subordinate tools and startup files, but a relocated
+// MinGW driver can still omit the directories of its runtime libraries.
+// Supply library search paths explicitly as well, for both probes and the CLI.
+func managedCompilerPrefixes(toolchain string) []string {
+	const target = "x86_64-w64-mingw32"
+	return []string{
+		filepath.Join(toolchain, "bin"),
+		filepath.Join(toolchain, "lib", "gcc", target, gccVersion),
+		filepath.Join(toolchain, target, "lib"),
+		filepath.Join(toolchain, "lib"),
+	}
+}
+
+func managedCompilerArgs(prefixes []string) []string {
+	args := []string{"-fno-use-linker-plugin"}
+	for _, prefix := range prefixes {
+		args = append(args, "-B"+filepath.ToSlash(prefix)+"/", "-L"+filepath.ToSlash(prefix))
+	}
+	return args
+}
+
 func checkCompiler(directory, executable string, probe compilerProbe, managed bool) error {
 	input := filepath.Join(directory, probe.filename)
 	if err := os.WriteFile(input, []byte(probe.source), 0600); err != nil {
@@ -61,11 +82,7 @@ func checkCompiler(directory, executable string, probe compilerProbe, managed bo
 		}
 		defer os.RemoveAll(temp)
 		env = append(env, "TEMP="+temp, "TMP="+temp)
-		const target = "x86_64-w64-mingw32"
-		args = append(args, "-fno-use-linker-plugin",
-			"-B"+bin+string(filepath.Separator),
-			"-B"+filepath.Join(toolchain, "lib", "gcc", target, gccVersion)+string(filepath.Separator),
-			"-B"+filepath.Join(toolchain, target, "lib")+string(filepath.Separator))
+		args = append(args, managedCompilerArgs(managedCompilerPrefixes(toolchain))...)
 	}
 	cmd := exec.CommandContext(ctx, executable, append(args, probe.filename, "-o", "probe.exe")...)
 	cmd.Dir = directory
