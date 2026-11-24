@@ -48,7 +48,10 @@ export function toolchain(config: { c?: string; cpp?: string } = {}): Toolchain 
   const managedCpp = !cpp && process.env.ACCODING_MANAGED_CXX;
   const portableFlags = (executable: string | false | undefined) => executable
     ? (process.env.ACCODING_MANAGED_GCC_PREFIXES ?? "").split(path.delimiter).filter(Boolean)
-      .flatMap(prefix => ["-B" + prefix + path.sep]).concat("-fno-use-linker-plugin")
+      .flatMap(prefix => {
+        const directory = prefix.replace(/\\/g, "/").replace(/\/$/, "");
+        return ["-B" + directory + "/", "-L" + directory];
+      }).concat("-fno-use-linker-plugin")
     : [];
   return {
     c: c || managedC ||
