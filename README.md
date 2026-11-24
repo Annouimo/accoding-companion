@@ -1,13 +1,13 @@
 # Accoding Companion
 
-独立的、**非官方** Accoding 命令行／终端编程助手。用于导入课程比赛、管理 C99/C++17 源码、本地评测及提交到 OJ。此项目与 Accoding、北航没有官方隶属关系。
+独立的、**非官方** Accoding 命令行／终端编程助手。用于导入课程比赛、管理 C / C++ 源码、本地评测及提交到 OJ。此项目与 Accoding、北航没有官方隶属关系。
 
 > 正式发行包见 [GitHub Releases](https://github.com/Annouimo/accoding-companion/releases/latest)。
 
 ## 产品设计
 
-- **一个课程工作区，多场比赛。** 初次配置工作区时指定 C99 或 C++17，比赛创建在该目录的独立子文件夹；用户自己的文件夹保持不变。
-- **题目可见文件精简。** 每道题默认生成 `main.c`（或 `main.cpp`）、`题目.md`，C99 另外生成小型 `exam.h` 入口。
+- **一个课程工作区，多场比赛。** 初次配置工作区时选择 C 或 C++，比赛创建在该目录的独立子文件夹；用户自己的文件夹保持不变。
+- **题目可见文件精简。** 每道题默认生成 `main.c`（或 `main.cpp`）、`题目.md`，C 题目的资源头文件存放在课程的 `.accoding/presets/` 中。
 - **内部数据隐藏。** 工作区根目录 `.accoding/` 保存题目与样例元数据、脚手架快照、不可变提交源码及提交历史。已有的普通文件不会被程序接管。
 - **本地测试与 OJ 使用同一份代码。** C99 在测试前按需展开脚手架，生成内容哈希标识的源码快照；测试通过后确认提交时复用该快照。
 - **全屏 Ink TUI + 独立 CLI。** 默认恢复上次停留的位置，菜单可首尾循环，Esc 返回上一层，H 定位当前题目或课程所用版本的 Markdown 函数手册。样例失败后会跳到首处差异，方向键滚动对照表，`[` 和 `]` 切换样例。窗口较小时可以使用经典菜单，编辑器通过 `test`、`submit` 调用 CLI。
@@ -30,7 +30,7 @@ node dist/accoding.mjs
 
 要模拟发行包，可以运行 `npm pack --dry-run`；由于脚本包含发布前打包，不会自动发布到 npm。
 
-从命令行初始化一个新的 C99 课程目录：
+从命令行初始化一个新的 C 课程目录：
 
 ```sh
 node dist/accoding.mjs login
@@ -51,7 +51,7 @@ node dist/accoding.mjs status --watch
 
 从 [最新发布页](https://github.com/Annouimo/accoding-companion/releases/latest) 下载对应平台的启动包并完整解压。Windows 双击 `Accoding Launcher.exe`，macOS 双击 `Accoding Launcher.command`。首次先选「安装」，完成后选「启动」。使用说明 HTML 随包提供，首次启动时打开。Linux 可使用下面的 npm 命令。
 
-函数手册随 C Exam Kit preset 0.6.6 起提供。按 H 在 Companion 中打开对应版本的章节目录。也可以在编辑器里直接打开 `.accoding/presets/<版本>/manual.zh-CN.md`。
+函数手册随 C Exam Kit preset 0.6.6 起提供。按 H 在 Companion 中打开对应版本的函数速查。新版速查按分类、条目和详情浏览，同类函数可在详情页对照使用。新版资源只分发程序内速查数据，旧工作区可以继续阅读已保存的 Markdown 手册。
 
 启动脚本检查 Node.js、主程序和 C Exam Kit。首次安装或有更新时会询问是否继续，完成后直接进入 Companion。已是最新版时会直接打开。断网时可以启动本机已安装的 Companion。
 
@@ -62,7 +62,7 @@ npm install -g @annouimo/accoding-companion @annouimo/c-exam-kit-preset
 accoding
 ```
 
-启动器使用独立的安装目录。直接用 npm 安装时，Companion 仍可从全局 npm 路径读取 preset。启用某个版本时，组件会复制到课程工作区。C++17 课程不需要 C99 资源包。
+启动器使用独立的安装目录。直接用 npm 安装时，Companion 仍可从全局 npm 路径读取 preset。启用某个版本时，组件会复制到课程工作区。C++ 课程可直接测试和提交。Windows x64 启动器在首次安装时优先使用已有的 GCC / G++，缺失时会安装一份自用的便携版 GCC。
 
 资源升级后使用「设置 → 更新课程资源」，或从启动器确认更新当前课程。批量更新适用于源码仍与初始模板一致的题。也可以自选题目，单题切换前会试编译，并记录可撤销的旧版本。
 

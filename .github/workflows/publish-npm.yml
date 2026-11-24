@@ -4,17 +4,24 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "DRY_RUN builds only; PUBLISH_LATEST publishes to npm latest"
+        description: "DRY_RUN builds only; PUBLISH_LATEST publishes the CLI; PUBLISH_LAUNCHERS publishes the ZIPs"
         type: choice
         required: true
         default: DRY_RUN
         options:
           - DRY_RUN
           - PUBLISH_LATEST
+          - PUBLISH_LAUNCHERS
       expected_version:
         description: "Must exactly match the checked-out stable package.json"
         type: string
         required: true
+
+      expected_preset_version:
+        description: "Published C Exam Kit version required for a launcher release"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -88,10 +95,11 @@ jobs:
         with:
           go-version-file: launcher/go.mod
           cache-dependency-path: launcher/go.sum
-      - name: Verify Go launcher and managed Node bootstrap
+      - name: Verify Go launcher and managed toolchains
         working-directory: launcher
         env:
           ACCODING_TEST_NODE_DOWNLOAD: "1"
+          ACCODING_TEST_GCC_DOWNLOAD: "1"
         run: go test -v ./...
 
   publish:
@@ -147,7 +155,8 @@ jobs:
 
   launcher-release:
     name: Publish double-click launcher ZIPs
-    needs: publish
+    needs: [pack, launcher, launcher-bundles]
+    if: ${{ inputs.mode == 'PUBLISH_LAUNCHERS' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -155,6 +164,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Verify both npm packages before publishing launchers
+        env:
+          EXPECTED_CLI: ${{ inputs.expected_version }}
+          EXPECTED_PRESET: ${{ inputs.expected_preset_version }}
+        run: |
+          set -euo pipefail
+          test "$(npm view @annouimo/accoding-companion@latest version)" = "$EXPECTED_CLI"
+          test -n "$EXPECTED_PRESET"
+          test "$(npm view @annouimo/c-exam-kit-preset@latest version)" = "$EXPECTED_PRESET"
       - uses: actions/download-artifact@v4
         with:
           name: native-launchers

@@ -54,6 +54,7 @@ async function snapshotPreset(
     encoding: "utf8", flag: "wx"
   });
   for (const component of preset.manifest.components) {
+    if (!component.source) continue;
     const target = path.resolve(base, component.source);
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, preset.code.get(component.id)!, {

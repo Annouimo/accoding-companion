@@ -14,25 +14,108 @@ import (
 )
 
 type menu struct {
-	cursor int
-	action int
-	status string
-	note   string
+	cursor  int
+	current string
+	release updateResult
+	action  action
+	status  string
+	updates []string
+	options []option
+	note    string
 }
 
-var items = []string{"安装", "启动", "更新", "卸载", "使用说明"}
+type action int
 
-func (m menu) Init() tea.Cmd { return nil }
+const (
+	installAction action = iota
+	startAction
+	updateAction
+	guideAction
+	uninstallAction
+)
+
+type option struct {
+	action action
+	label  string
+}
+
+var launcherVersion = "dev"
+
+func menuOptions(installed bool, updates []string) []option {
+	if !installed {
+		return []option{{installAction, "安装"}, {guideAction, "使用说明"}}
+	}
+	options := []option{{startAction, "启动"}}
+	if len(updates) != 0 {
+		names := make([]string, 0, len(updates))
+		for _, update := range updates {
+			name, _, _ := strings.Cut(update, ": ")
+			names = append(names, name)
+		}
+		options = append(options, option{updateAction, "更新 " + strings.Join(names, " 和 ")})
+	}
+	return append(options, option{guideAction, "使用说明"}, option{uninstallAction, "卸载"})
+}
+
+type updateResult struct {
+	cli, preset string
+	err         error
+}
+
+func checkUpdates() tea.Msg {
+	cli, err := registryVersion(cliPackage)
+	if err != nil {
+		return updateResult{err: err}
+	}
+	preset, err := registryVersion(presetPackage)
+	return updateResult{cli: cli, preset: preset, err: err}
+}
+
+func availableUpdates(current string, release updateResult) []string {
+	var updates []string
+	for _, pkg := range []struct{ name, label, latest string }{
+		{cliPackage, "Companion", release.cli},
+		{presetPackage, "C Exam Kit", release.preset},
+	} {
+		old := versionOf(current, pkg.name)
+		if newerVersion(pkg.latest, old) {
+			updates = append(updates, pkg.label+": "+old+" → "+pkg.latest)
+		}
+	}
+	return updates
+}
+
+func (m menu) Init() tea.Cmd {
+	if m.current == "" {
+		return nil
+	}
+	return func() tea.Msg { return checkUpdates() }
+}
 
 func (m menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if release, ok := msg.(updateResult); ok {
+		previous := m.options[m.cursor].action
+		m.release = release
+		m.updates = availableUpdates(m.current, release)
+		m.options = menuOptions(true, m.updates)
+		m.cursor = 0
+		for index, option := range m.options {
+			if option.action == previous {
+				m.cursor = index
+			}
+		}
+		if release.err != nil {
+			m.note = "暂时无法检查更新。"
+		}
+	}
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "up":
-			m.cursor = (m.cursor + len(items) - 1) % len(items)
+			m.cursor = (m.cursor + len(m.options) - 1) % len(m.options)
 		case "down":
-			m.cursor = (m.cursor + 1) % len(items)
+			m.cursor = (m.cursor + 1) % len(m.options)
 		case "enter":
-			m.action = m.cursor
+			m.action = m.options[m.cursor].action
 			return m, tea.Quit
 		case "q", "esc", "ctrl+c":
 			m.action = -1
@@ -44,15 +127,20 @@ func (m menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m menu) View() string {
 	var view strings.Builder
-	fmt.Fprintln(&view, "Accoding 启动器")
-	fmt.Fprintln(&view, m.status)
+	fmt.Fprintln(&view, "Accoding 启动器  v"+launcherVersion)
+	fmt.Fprintln(&view, "Annouimo · https://github.com/Annouimo/accoding-companion")
 	fmt.Fprintln(&view)
-	for i, item := range items {
+	fmt.Fprintln(&view, m.status)
+	for _, update := range m.updates {
+		fmt.Fprintln(&view, "可更新  "+update)
+	}
+	fmt.Fprintln(&view)
+	for i, item := range m.options {
 		marker := "  "
 		if i == m.cursor {
 			marker = "› "
 		}
-		fmt.Fprintln(&view, marker+item)
+		fmt.Fprintln(&view, marker+item.label)
 	}
 	if m.note != "" {
 		fmt.Fprintln(&view, "\n"+m.note)
@@ -86,73 +174,65 @@ func run() error {
 	}
 
 	current := readInstallation(root)
-	cursor, note := 0, ""
-	if current != "" {
-		cursor = 1
+	note := ""
+	if current == "" {
+		marker := filepath.Join(root, "guide-opened")
+		if _, err := os.Stat(marker); os.IsNotExist(err) {
+			if err := showGuide(guide); err != nil {
+				note = "无法打开使用说明：" + err.Error()
+			} else if err := os.MkdirAll(root, 0700); err == nil {
+				_ = os.WriteFile(marker, nil, 0600)
+			}
+		}
 	}
 	for {
 		status := "尚未安装"
 		if current != "" {
-			status = "Companion " + versionOf(current, cliPackage) + " · 资源包 " + versionOf(current, presetPackage)
+			status = "已安装  Companion " + versionOf(current, cliPackage) + " · C Exam Kit " + versionOf(current, presetPackage)
 		}
-		result, err := tea.NewProgram(menu{cursor: cursor, action: -1, status: status, note: note}, tea.WithAltScreen()).Run()
+		result, err := tea.NewProgram(menu{current: current, options: menuOptions(current != "", nil),
+			action: -1, status: status, note: note}, tea.WithAltScreen()).Run()
 		if err != nil {
 			return err
 		}
-		action := result.(menu).action
-		if action < 0 {
+		chosen := result.(menu)
+		if chosen.action < 0 {
 			return nil
 		}
-		cursor, note = action, ""
-		switch items[action] {
-		case "安装", "更新":
-			if action == 0 && current != "" {
-				cursor, note = 1, "已安装，按 Enter 启动。"
-				continue
-			}
-			if action == 2 && current == "" {
-				cursor, note = 0, "请先安装。"
-				continue
-			}
+		note = ""
+		switch chosen.action {
+		case installAction, updateAction:
 			oldPreset := versionOf(current, presetPackage)
-			newPath, err := install(root, current)
+			newPath, err := install(root, current, chosen.release)
 			if err != nil {
 				pause("安装或更新失败：" + err.Error())
 				continue
 			}
 			current = newPath
 			preset := versionOf(current, presetPackage)
-			if action == 2 && oldPreset != preset {
+			if chosen.action == updateAction && oldPreset != preset {
 				promptWorkspaceUpdate(root, current, preset)
 			}
-			cursor, note = 1, "安装已就绪，按 Enter 启动。"
-		case "启动":
-			if current == "" {
-				cursor, note = 0, "请先安装。"
-				continue
-			}
-			if err := start(root, current, guide); err != nil {
+			note = "安装已就绪，按 Enter 启动。"
+		case startAction:
+			if err := start(root, current); err != nil {
 				pause("启动失败：" + err.Error())
 			}
-		case "卸载":
-			if current == "" {
-				note = "没有由此启动器管理的安装。"
-				continue
-			}
+		case uninstallAction:
 			if confirm("卸载 Companion 和启动器下载的资源？课程文件及资源快照会保留。") {
 				if err := os.Remove(filepath.Join(root, "current")); err != nil {
 					pause("卸载失败：" + err.Error())
 					continue
 				}
 				current = ""
-				for _, dir := range []string{"packages", "runtime"} {
+				for _, dir := range []string{"packages", "runtime", "compiler"} {
 					if err := os.RemoveAll(filepath.Join(root, dir)); err != nil {
 						pause("部分安装文件未能移除：" + err.Error())
 					}
 				}
-				cursor, note = 0, "已卸载。"
+				note = "已卸载。"
 			}
-		case "使用说明":
+		case guideAction:
 			if err := showGuide(guide); err != nil {
 				note = "无法打开使用说明：" + err.Error()
 			}
@@ -181,32 +261,31 @@ func showGuide(file string) error {
 }
 
 func companion(root, installed string, args ...string) (*exec.Cmd, error) {
-	runtime, err := findNode(root)
+	node, err := findNode(root)
 	if err != nil {
 		return nil, err
 	}
 	entry := filepath.Join(packagePath(installed, cliPackage), "dist", "accoding.mjs")
-	cmd := exec.Command(runtime.node, append([]string{entry}, args...)...)
+	cmd := exec.Command(node.node, append([]string{entry}, args...)...)
 	cmd.Env = append(os.Environ(), "ACCODING_PRESET_PACKAGE="+packagePath(installed, presetPackage))
+	if runtime.GOOS == "windows" {
+		bin := managedCompilerBin(root)
+		if isFile(filepath.Join(bin, "gcc.exe")) && isFile(filepath.Join(bin, "g++.exe")) {
+			cmd.Env = append(cmd.Env, compilerFlags(bin)...)
+			cmd.Env = append(cmd.Env, "ACCODING_MANAGED_CC="+filepath.Join(bin, "gcc.exe"),
+				"ACCODING_MANAGED_CXX="+filepath.Join(bin, "g++.exe"))
+		}
+	}
 	return cmd, nil
 }
 
-func start(root, installed, guide string) error {
+func start(root, installed string) error {
 	cmd, err := companion(root, installed)
 	if err != nil {
 		return err
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	marker := filepath.Join(root, "guide-opened")
-	if _, err := os.Stat(marker); os.IsNotExist(err) {
-		if showGuide(guide) == nil {
-			_ = os.WriteFile(marker, nil, 0600)
-		}
-	}
-	return cmd.Wait()
+	return cmd.Run()
 }
 
 func promptWorkspaceUpdate(root, installed, version string) {
@@ -227,12 +306,16 @@ func promptWorkspaceUpdate(root, installed, version string) {
 	var plan struct {
 		Root               string
 		Eligible, Retained int
+		Edited, Unknown    int
 	}
 	if err := json.Unmarshal(output, &plan); err != nil || !filepath.IsAbs(plan.Root) {
 		pause("Companion 未返回可用的课程更新预览。")
 		return
 	}
 	fmt.Printf("\n课程 %s\n新题使用 %s · 可更新 %d 道旧题 · 保留 %d 道\n", plan.Root, version, plan.Eligible, plan.Retained)
+	if plan.Edited+plan.Unknown != 0 {
+		fmt.Printf("保留原因：已改动 %d 道 · 无法确认 %d 道\n", plan.Edited, plan.Unknown)
+	}
 	if !confirm("更新此课程的资源？") {
 		return
 	}

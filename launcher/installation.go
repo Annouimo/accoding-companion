@@ -3,11 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const cliPackage = "@annouimo/accoding-companion"
@@ -56,8 +59,45 @@ func readInstallation(root string) string {
 	return ""
 }
 
-func install(root, installed string) (string, error) {
-	fmt.Println("正在检查 Node.js…")
+func registryVersion(name string) (string, error) {
+	client := http.Client{Timeout: 5 * time.Second}
+	response, err := client.Get("https://registry.npmjs.org/" + name + "/latest")
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	var pack struct{ Version string }
+	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&pack) != nil ||
+		!stableVersion.MatchString(pack.Version) {
+		return "", fmt.Errorf("无法读取 %s 的最新版本", name)
+	}
+	return pack.Version, nil
+}
+
+func newerVersion(latest, current string) bool {
+	if !stableVersion.MatchString(latest) || !stableVersion.MatchString(current) {
+		return false
+	}
+	a, b := strings.Split(latest, "."), strings.Split(current, ".")
+	for index := range a {
+		x, _ := strconv.Atoi(a[index])
+		y, _ := strconv.Atoi(b[index])
+		if x != y {
+			return x > y
+		}
+	}
+	return false
+}
+
+func progress(step int, label string) {
+	fmt.Printf("[%s%s] %d/5 %s\n", strings.Repeat("█", step), strings.Repeat("░", 5-step), step, label)
+}
+
+func install(root, installed string, available updateResult) (string, error) {
+	progress(1, "检查运行环境")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return "", err
+	}
 	r, err := findNode(root)
 	if err != nil {
 		fmt.Println("正在安装本应用专用的 Node.js…")
@@ -66,14 +106,30 @@ func install(root, installed string) (string, error) {
 			return "", fmt.Errorf("安装 Node.js：%w", err)
 		}
 	}
-	fmt.Println("正在检查 Companion 和资源包版本…")
-	cli, err := r.latest(cliPackage)
-	if err != nil {
-		return "", err
+	if installed == "" {
+		if err := checkWindowsCompilers(root); err != nil {
+			return "", fmt.Errorf("安装 C / C++ 编译器：%w", err)
+		}
 	}
-	preset, err := r.latest(presetPackage)
-	if err != nil {
-		return "", err
+	progress(2, "确认安装版本")
+	cli, preset := available.cli, available.preset
+	if installed == "" {
+		cli, err = r.latest(cliPackage)
+		if err != nil {
+			return "", err
+		}
+		preset, err = r.latest(presetPackage)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		installedCLI, installedPreset := versionOf(installed, cliPackage), versionOf(installed, presetPackage)
+		if !newerVersion(cli, installedCLI) {
+			cli = installedCLI
+		}
+		if !newerVersion(preset, installedPreset) {
+			preset = installedPreset
+		}
 	}
 	if installed != "" {
 		fmt.Printf("Companion %s → %s\n资源包 %s → %s\n",
@@ -100,7 +156,7 @@ func install(root, installed string) (string, error) {
 			_ = os.RemoveAll(stage)
 		}
 	}()
-	fmt.Printf("正在安装 Companion %s 和资源包 %s…\n", cli, preset)
+	progress(3, fmt.Sprintf("安装 Companion %s 和 C Exam Kit %s", cli, preset))
 	cmd := exec.Command(r.node, r.npm, "install", "--prefix", stage, "--no-save",
 		"--ignore-scripts", "--no-audit", "--no-fund",
 		cliPackage+"@"+cli, presetPackage+"@"+preset)
@@ -108,6 +164,7 @@ func install(root, installed string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("安装 npm 包：%w", err)
 	}
+	progress(4, "验证安装文件")
 	if !validInstallation(stage) || versionOf(stage, cliPackage) != cli || versionOf(stage, presetPackage) != preset {
 		return "", fmt.Errorf("下载的包缺少文件或版本不匹配")
 	}
@@ -133,5 +190,6 @@ func install(root, installed string) (string, error) {
 		return "", err
 	}
 	saved = true
+	progress(5, "安装完成")
 	return stage, nil
 }

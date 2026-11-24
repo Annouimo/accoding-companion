@@ -1,5 +1,5 @@
 import * as fs from "node:fs/promises";
-import { cTemplate, cppTemplate, defaultSourceFiles } from "./sources";
+import { cTemplate, cppTemplate, defaultSourceFiles, languages } from "./sources";
 import { extractSamples, readableStatement } from "../problems/statement";
 import {
   readContestRoster,
@@ -215,8 +215,8 @@ export class WorkspaceStore {
       };
     if (config.kind !== "course" || !["c", "cpp"].includes(config.language || ""))
       throw new Error("课程工作区配置缺失或不兼容。");
-    const files = directory ? { c: path.posix.join(directory, "main.c"),
-      cpp: path.posix.join(directory, "main.cpp") } : defaultSourceFiles(problem.target);
+    const files = directory ? { c: path.posix.join(directory, languages.c.file),
+      cpp: path.posix.join(directory, languages.cpp.file) } : defaultSourceFiles(problem.target);
     const [relative, template] = config.language === "c"
       ? [files.c, cTemplate] : [files.cpp, cppTemplate];
     const file = await safePath(this.root, relative);
@@ -238,7 +238,7 @@ export class WorkspaceStore {
       }
       if (directory) {
         const marker = await safePath(this.root, `${directory}/main.c`);
-        if (!marker.endsWith(path.join(directory, "main.c")))
+        if (!marker.endsWith(path.join(directory, languages.c.file)))
           throw new Error("Invalid problem source directory");
       }
       const config = JSON.parse(await fs.readFile(

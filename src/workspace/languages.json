@@ -1,0 +1,4 @@
+{
+  "c": {"id":"c99","label":"C","file":"main.c","driver":"native","standard":"c99","template":"#include <stdio.h>\n\nint main() {\n    return 0;\n}\n"},
+  "cpp": {"id":"cpp17","label":"C++","file":"main.cpp","driver":"native","standard":"c++17","template":"#include <iostream>\n\nint main() {\n    return 0;\n}\n"}
+}

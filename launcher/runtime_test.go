@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,14 +12,14 @@ import (
 )
 
 func TestMenuKeepsInstallSeparateFromStart(t *testing.T) {
-	m := menu{cursor: 0, action: -1}
+	m := menu{options: menuOptions(false, nil), action: -1}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if next.(menu).action != 0 {
+	if next.(menu).action != installAction {
 		t.Fatal("first-time Enter must select Install")
 	}
-	m.cursor = 1
+	m.options = menuOptions(true, nil)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if next.(menu).action != 1 {
+	if next.(menu).action != startAction {
 		t.Fatal("installed Enter must select Start")
 	}
 }
@@ -42,5 +43,37 @@ func TestManagedRuntimeFromChinesePath(t *testing.T) {
 	next, err := findNode(root)
 	if err != nil || next != r {
 		t.Fatalf("could not rediscover Node.js without restarting: %v", err)
+	}
+}
+
+func TestInstalledMenuOnlyShowsAvailableActions(t *testing.T) {
+	options := menuOptions(true, []string{"C Exam Kit: 0.6.6 → 0.6.7"})
+	if len(options) != 4 || options[1].label != "更新 C Exam Kit" {
+		t.Fatalf("unexpected options: %v", options)
+	}
+	if len(menuOptions(true, nil)) != 3 || len(menuOptions(false, nil)) != 2 {
+		t.Fatal("unexpected menu for an installation without updates")
+	}
+	if !newerVersion("0.6.10", "0.6.9") || newerVersion("0.6.9", "0.6.10") {
+		t.Fatal("versions must be compared numerically")
+	}
+}
+
+func TestManagedGCCFromChinesePath(t *testing.T) {
+	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" || os.Getenv("ACCODING_TEST_GCC_DOWNLOAD") != "1" {
+		t.Skip("requires Windows x64 and the pinned compiler download")
+	}
+	root := filepath.Join(t.TempDir(), "中文 路径")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := installWindowsCompiler(root, root); err != nil {
+		t.Fatal(err)
+	}
+	for _, probe := range compilerProbes {
+		executable := filepath.Join(managedCompilerBin(root), probe.command+".exe")
+		if err := checkCompiler(root, executable, probe); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

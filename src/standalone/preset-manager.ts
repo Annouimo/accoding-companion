@@ -4,12 +4,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { dataDirectory } from "./state";
-import { loadPreset, renderHeader, assembleC, quotedIncludes, PRESET_MANUAL, type LoadedPreset } from "./scaffold";
+import { loadPreset, renderHeader, assembleC, quotedIncludes, PRESET_MANUAL, PRESET_REFERENCE, type LoadedPreset } from "./scaffold";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { withWorkspaceLock } from "../workspace/lock";
 import { compile, type Toolchain } from "../judge/judge";
 import { WorkspaceStore } from "../workspace/store";
-import { cTemplate } from "../workspace/sources";
+import { cTemplate, languages } from "../workspace/sources";
 import { hash, type Binding } from "../model";
 
 const DATA_PACKAGE = "@annouimo/c-exam-kit-preset";
@@ -95,8 +95,9 @@ export async function setCoursePresetVersion(root: string, version: string): Pro
   const file = await safePath(root, ".accoding/workspace.json");
   await withWorkspaceLock(path.join(path.dirname(file), "write.lock"), async () => {
     const config = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
-    if (config.kind !== "course" || config.language !== "c")
-      throw new Error("此课程不使用 C99 脚手架。");
+    if (config.kind !== "course" || config.language !== "c" ||
+      (config.languageId ?? languages.c.id) !== (installed.preset.manifest.languageId ?? languages.c.id))
+      throw new Error("资源包与课程语言不匹配。");
     config.presetVersion = version;
     await atomicWrite(file, JSON.stringify(config, null, 2) + "\n");
   });
@@ -104,7 +105,7 @@ export async function setCoursePresetVersion(root: string, version: string): Pro
 
 export type UpdateMode = "empty" | "selected";
 
-async function untouchedSource(root: string, binding: Binding, source: string, code: string) {
+async function sourceStatus(root: string, binding: Binding, source: string, code: string) {
   let initial = binding.initialSourceHash;
   if (!initial) {
     const mark = await safePath(root, ".accoding/initial-hashes/" + binding.bindingId + ".json");
@@ -115,17 +116,17 @@ async function untouchedSource(root: string, binding: Binding, source: string, c
           !(error instanceof SyntaxError)) throw error;
     }
   }
-  if (initial) return hash(code) === initial;
+  if (initial) return hash(code) === initial ? "untouched" : "edited";
   const include = sharedInclude(root, source, code);
-  return Boolean(include && code === '#include "' + include.include + '"\n' + cTemplate);
+  return include && code === '#include "' + include.include + '"\n' + cTemplate ? "untouched" : "unknown";
 }
 
 export async function chooseUpdateTargets(
   root: string, bindings: Binding[], mode: UpdateMode, selected: string[] = [], version?: string
-): Promise<{ targets: Binding[]; retained: number }> {
+): Promise<{ targets: Binding[]; retained: number; edited: number; unknown: number }> {
   const eligible = bindings.filter(b => !b.unavailable && /\.c$/i.test(b.sourceFile));
   const targets: Binding[] = [];
-  let retained = 0;
+  let edited = 0, unknown = 0;
   for (const binding of eligible) {
     if (mode === "selected" && !selected.includes(binding.bindingId)) continue;
     const source = await safePath(root, binding.sourceFile);
@@ -134,11 +135,13 @@ export async function chooseUpdateTargets(
       return undefined;
     });
     if (code !== undefined && version && sharedInclude(root, source, code)?.key === version) continue;
-    if (code !== undefined && (mode === "selected" || await untouchedSource(root, binding, source, code)))
-      targets.push(binding);
-    else retained++;
+    const status = code === undefined ? "unknown" :
+      mode === "selected" ? "untouched" : await sourceStatus(root, binding, source, code);
+    if (status === "untouched") targets.push(binding);
+    else if (status === "edited") edited++;
+    else unknown++;
   }
-  return { targets, retained };
+  return { targets, retained: edited + unknown, edited, unknown };
 }
 
 const SNAPSHOT_KEY = /^(?:[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?|local-[a-f0-9]{64})$/;
@@ -171,11 +174,15 @@ export async function saveSharedPreset(root: string, preset: LoadedPreset, versi
         const manualFile = await safePath(destination, PRESET_MANUAL);
         await atomicWrite(manualFile, preset.manual);
       }
+      if (existing.reference === undefined && preset.reference !== undefined)
+        await atomicWrite(await safePath(destination, PRESET_REFERENCE), preset.reference);
       return;
     }
     const stage = path.join(base, ".stage-" + randomUUID());
     try {
+      await fs.mkdir(stage);
       for (const component of preset.manifest.components) {
+        if (!component.source) continue;
         const target = await safePath(stage, component.source);
         await fs.mkdir(path.dirname(target), { recursive: true });
         await fs.writeFile(target, preset.code.get(component.id)!, { flag: "wx" });
@@ -185,6 +192,8 @@ export async function saveSharedPreset(root: string, preset: LoadedPreset, versi
       await fs.writeFile(path.join(stage, "expanded.h"), renderHeader(preset));
       if (preset.manual !== undefined)
         await fs.writeFile(path.join(stage, PRESET_MANUAL), preset.manual);
+      if (preset.reference !== undefined)
+        await fs.writeFile(path.join(stage, PRESET_REFERENCE), preset.reference);
       await fs.rename(stage, destination);
     } finally {
       await fs.rm(stage, { recursive: true, force: true });
@@ -241,7 +250,7 @@ export async function applyPresetVersion(
   root: string, binding: Binding, installed: InstalledPreset, toolchain: Toolchain, onlyUntouched = false
 ): Promise<boolean> {
   const source = await safePath(root, binding.sourceFile);
-  if (path.extname(source).toLowerCase() !== ".c") throw new Error("仅 C99 支持 C Exam Kit。");
+  if (path.extname(source).toLowerCase() !== ".c") throw new Error("C Exam Kit 需要 C 源文件。");
   const preset = installed.preset;
   const target = await saveSharedPreset(root, preset, installed.version);
   const nextInclude = presetInclude(source, target.directory);
@@ -249,7 +258,7 @@ export async function applyPresetVersion(
     const workspace = new WorkspaceStore(root);
     const current = await workspace.read(binding.bindingId);
     const code = await fs.readFile(source, "utf8");
-    if (onlyUntouched && !(await untouchedSource(root, current, source, code)))
+    if (onlyUntouched && await sourceStatus(root, current, source, code) !== "untouched")
       throw new Error("源码已改动或无法确认初始内容。");
     const previous = await previousPreset(root, current, source, code);
     if (!previous) throw new Error("此题没有可切换的脚手架引用。");

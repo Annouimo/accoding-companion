@@ -20,6 +20,7 @@
   kbd, code { background: var(--panel); border-radius: .2rem; padding: .12em .35em; }
   ul, ol { padding-left: 1.4rem; }
   li + li { margin-top: .35rem; }
+  .tip { border-inline-start: 3px solid var(--accent); padding-inline-start: .8rem; }
   .example { background: var(--panel); border-inline-start: 3px solid var(--accent); padding: .65rem 1rem; border-radius: .4rem; }
   .example ul { margin: .3rem 0; }
   figure { margin: 1rem 0; }
@@ -34,53 +35,76 @@
   .contest-id { top: 13.7%; left: 18.5%; width: 4%; height: 4.7%; }
   dialog form { text-align: right; margin-bottom: .5rem; }
   dialog button { font: inherit; }
+  section { scroll-margin-top: 1.5rem; }
+  article { margin-top: 1.15rem; }
+  pre { max-width: 100%; overflow: auto; padding: 1rem; border-radius: .45rem; background: #1b2623; color: #edf5ef; font: .9rem/1.55 ui-monospace, monospace; }
+  .type { color: #8bdbe9; }
+  .function { color: #9ee0a5; font-weight: 650; }
+  .difference { color: #ffaea2; }
+  .pages { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .5rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+  .pages button { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: .35rem; padding: .4rem .8rem; font: inherit; }
+  .pages button:disabled { opacity: .45; }
+  nav [aria-current] { font-weight: bold; }
   footer { border-top: 1px solid var(--line); margin-top: 2rem; padding-top: .75rem; }
 </style>
 <main>
 <header>
   <h1>Accoding Companion 使用说明</h1>
-  <p>从导入一场课程比赛开始，在自己的编辑器写代码，再用 Companion 测试和提交。</p>
+  <p>安装 Companion、导入课程比赛、运行样例及提交。</p>
 </header>
-<nav aria-label="目录">
-  <a href="#install">安装和启动</a><a href="#course">选择课程文件夹</a>
-  <a href="#import">找比赛 ID</a><a href="#solve">写代码、测试和提交</a><a href="#update">更新资源</a>
+<nav aria-label="使用说明模块">
+  <a href="#install">安装和首次启动</a><a href="#course">课程文件夹和比赛</a>
+  <a href="#solve">写代码、测试和提交</a><a href="#update">更新工具与资源</a>
 </nav>
 <section id="install">
-  <h2>安装和启动</h2>
-  <ol>
-    <li>完整解压下载的启动包。Windows 双击 <strong>Accoding Launcher.exe</strong>，macOS 双击 <strong>Accoding Launcher.command</strong>。</li>
-    <li>在启动器里选「安装」。启动器会检查 Node.js，并安装 Companion 和 C Exam Kit 资源包。首次安装需要联网。</li>
-    <li>看到安装完成后，选「启动」。以后打开启动器，可以直接选「启动」。</li>
-    <li>在 Companion 的「设置」里选「登录 Accoding」。在同一屏输入账号和密码，可选「保持登录」，再按 <kbd>Enter</kbd>。<kbd>Tab</kbd> 切换字段。</li>
-  </ol>
+  <h2>安装和首次启动</h2>
+  <article><h3>打开启动器</h3>
+    <p>完整解压启动包。Windows 双击 <strong>Accoding Launcher.exe</strong>，macOS 双击 <strong>Accoding Launcher.command</strong>。还没安装时，第一次打开启动器会自动显示这份指南。读完可以切回终端继续。</p>
+    <p class="tip">只需解压一次。以后从解压后的文件夹打开启动器；想再看这份指南，可以选「使用说明」。终端里的 <strong>›</strong> 表示当前选项，用方向键移动，按回车确认。</p>
+    <pre>Accoding 启动器  v@VERSION@
+Annouimo · https://github.com/Annouimo/accoding-companion
+
+尚未安装
+
+› 安装
+  使用说明</pre>
+  </article>
+  <article><h3>跟随进度完成安装</h3>
+    <p>选择「安装」并按回车。保持联网，启动器会准备 Node.js，安装 Companion 和 C Exam Kit。Windows x64 会先检查已有的 GCC 和 G++。如果缺少可用的编译器，启动器会下载约 251 MiB 的便携版，显示下载进度，并自动验证。Windows ARM64 可以在 Companion 的设置里指定已有编译器。</p>
+    <p class="tip">下载期间让启动器保持打开。若因断网失败，恢复联网后返回首页，重新选「安装」。看到「安装已就绪」后即可启动。</p>
+    <pre>[█░░░░] 1/5 检查运行环境
+[██░░░] 2/5 确认安装版本
+[███░░] 3/5 安装 Companion … 和 C Exam Kit …
+[████░] 4/5 验证安装文件
+[█████] 5/5 安装完成</pre>
+  </article>
+  <article><h3>启动并登录</h3>
+    <p>看到「安装已就绪」，按回车启动 Companion。在「设置」选「登录 Accoding」。用 <kbd>Tab</kbd> 切换字段，<kbd>Space</kbd> 勾选保持登录，再按 <kbd>Enter</kbd>。使用课程平台的 Accoding 账号。共用电脑上可以让「保持登录」保持未勾选。</p>
+    <pre>登录 Accoding
+  用户名  …
+  密码    …
+  保持登录</pre>
+  </article>
 </section>
 <section id="course">
-  <h2>选哪一个课程文件夹</h2>
-  <p><strong>课程文件夹是这门课所有比赛和题目的上一级目录。</strong> 在「设置」里选「切换或新建课程」，再选一个已有文件夹或输入一个新路径。已有的 C 代码也可以留在这个目录里。第一次配置时，为此课程选 C99 或 C++17。</p>
-  <div class="example">
-    <ul>
-      <li><strong>C-lang-course/</strong> ← 选这一层
-        <ul>
-          <li><strong>R-2026级C语言程序设计期末复习赛/</strong> ← 导入比赛 1359 后生成
-            <ul>
-              <li><strong>A-来岁昭昭的签到表/</strong>，里面有 <code>题目.md</code> 和 <code>main.c</code></li>
-              <li><strong>AA-gcd-lcm quiz/</strong>，里面也有自己的题目与源码</li>
-            </ul>
-          </li>
-          <li><strong>E8-2026级C语言程序设计第八次练习赛/</strong> ← 同一个课程文件夹中的另一场比赛</li>
-        </ul>
-      </li>
-    </ul>
-  </div>
-  <p>你的目录可以叫别的名字。以后导入新比赛时，Companion 会继续把它放在这门课的目录下。</p>
-</section>
-<section id="import">
-  <h2>找到比赛 ID 并导入</h2>
-  <ol>
-    <li>在 Accoding 打开这门课，选左边的「课程比赛」。</li>
-    <li>找比赛标题，在同一行的第一列「比赛ID」取数字。期末复习赛的 ID 是 <strong>1359</strong>。</li>
-    <li>回到 Companion，选「导入」→「导入比赛 / 作业」，在「比赛 ID」输入 <code>1359</code> 并按回车。导入后进入比赛列表，再选要做的题。</li>
-  </ol>
+  <h2>课程文件夹和比赛</h2>
+  <article><h3>选择课程文件夹</h3>
+    <p>在「设置」选「切换或新建课程」。课程文件夹是用来归放这门课所有比赛和题目的总目录。选择已有文件夹或输入新目录，然后选 C 或 C++。</p>
+    <p class="tip">可以粘贴完整路径，也可以把已打开的课程文件夹拖进终端。已有课程代码时，选存放各场比赛的那一层。单场比赛目录和单题目录应放在这一层下面。</p>
+    <pre>选择课程的编程语言
+❯ C
+  C++</pre>
+    <p>例如下面应选择 <code>C-lang-course</code> 这一层。每场比赛有自己的文件夹，每道题又有自己的子文件夹。</p>
+    <div class="example">
+      <ul><li><strong>C-lang-course/</strong>
+        <ul><li>R-2026级C语言程序设计期末复习赛/
+          <ul><li>A-来岁昭昭的签到表/ · 题目.md、main.c</li><li>AA-gcd-lcm quiz/ · 题目.md、main.c</li></ul>
+        </li><li>E8-2026级C语言程序设计第八次练习赛/</li></ul>
+      </li></ul>
+    </div>
+  </article>
+  <article><h3>在 Accoding 找到比赛 ID</h3>
+    <p>打开课程，选择左侧「课程比赛」。在比赛标题同一行的第一列找到「比赛ID」。期末复习赛这行是 <strong>1359</strong>。</p>
   <figure>
     <a class="preview" id="contest-preview" href="images/contest-list.png" aria-label="放大查看课程比赛截图">
       <img src="images/contest-list.png" alt="Accoding 的课程比赛列表，左侧为课程比赛，第一行左侧的比赛 ID 为 1359">
@@ -94,23 +118,127 @@
       <span class="callout courses" aria-hidden="true"></span><span class="callout contest-id" aria-hidden="true"></span>
     </div>
   </dialog>
+
+  </article>
+  <article><h3>输入比赛 ID</h3>
+    <p>回到 Companion，选择「导入 → 导入比赛 / 作业」。输入 <code>1359</code> 并回车。导入后，打开该比赛，再选题目编号。如果列表里没找到比赛，先核对比赛 ID 和当前登录的课程账号。</p>
+    <pre>导入比赛 / 作业
+比赛 ID  1359</pre>
+  </article>
 </section>
 <section id="solve">
   <h2>写代码、测试和提交</h2>
-  <ol>
-    <li>在比赛中选择一道题，选「打开代码目录」。用自己的编辑器打开 <code>题目.md</code> 和 <code>main.c</code>，把答案写在 <code>main.c</code>。保留生成代码中引用 C99 资源的头文件。</li>
-    <li>想查函数时按 <kbd>H</kbd>。进入速查目录后，用方向键选择章节，按回车阅读，按 <kbd>Esc</kbd> 返回。</li>
-    <li>保存源码，回到 Companion 选「运行样例」。样例失败时，表格会显示样例输出和你的输出。上下键看后续行，左右键看长行。</li>
-    <li>样例通过后可选「提交本次通过的版本」。修改代码后重新跑样例，再提交新版本。</li>
-  </ol>
+  <article><h3>在编辑器中写代码</h3>
+    <p>进入题目后选「打开代码目录」。打开 <code>题目.md</code> 和 <code>main.c</code>。C++ 课程使用 <code>main.cpp</code>。保留 C 题目模板里的脚手架头文件引用。把代码写在选中的题目文件夹里，保存后回到原来的终端窗口。</p>
+    <pre>❯ 打开代码目录
+  运行样例</pre>
+  </article>
+  <article><h3>按 H 查函数</h3>
+    <p>在使用 C Exam Kit 的课程中按 <kbd>H</kbd>，用方向键和回车打开「输入和输出 → 读一个数」。三种类型的签名和示例放在一页。比如要读 <code>long long</code>，就找 <code>read_ll()</code>。长代码可用左右方向键查看，按 <kbd>Esc</kbd> 退回上一级。</p>
+    <pre>C 函数速查 · 0.6.7 › 输入和输出 › 读一个数
+<span class="type">int</span> <span class="function">read_int</span>(<span class="type">void</span>);
+<span class="type">long long</span> <span class="function">read_ll</span>(<span class="type">void</span>);
+<span class="type">double</span> <span class="function">read_double</span>(<span class="type">void</span>);</pre>
+  </article>
+  <article><h3>运行样例</h3>
+    <p>保存源文件，回到 Companion 选择「运行样例」。程序输出与预期不同的行会标出。先看第一条差异，再用上下方向键看其他行、左右方向键看长行。若提示编译失败，先根据报错修改源文件，再运行样例。</p>
+    <pre> 行号  样例输出  我的输出
+<span class="difference">!   1  +1        -1</span>
+    2  -1        -1</pre>
+  </article>
+  <article><h3>提交通过样例的版本</h3>
+    <p>选择「提交本次通过的版本」。确认要提交的题目和版本。修改代码后，保存并重新跑样例，再提交新版本。本地样例通过后，最终判题结果仍以 Accoding 为准。</p>
+    <pre>❯ 提交本次通过的版本</pre>
+  </article>
 </section>
 <section id="update">
-  <h2>更新资源</h2>
-  <p>启动器的「更新」安装新的 Companion 或资源包。资源包升级后，可以按提示预览当前课程的更新。确认时会显示课程路径、新题将使用的版本和旧题数量。批量更新会选择未改动的旧题，已经写过代码的题可以在 Companion 里单独选择和验证。</p>
+  <h2>更新工具与资源</h2>
+  <article><h3>查看更新版本</h3>
+    <p>启动器首页会显示可以更新的组件和目标版本。选相应的「更新」操作即可安装。没有更新提示时，选「启动」继续使用当前版本。这里更新的是启动器管理的那份安装。</p>
+    <pre>已安装  Companion @VERSION@ · C Exam Kit 0.6.6
+可更新  C Exam Kit: 0.6.6 → 0.6.7
+
+  启动
+› 更新 C Exam Kit
+  使用说明
+  卸载</pre>
+  </article>
+  <article><h3>决定是否更新已有课程</h3>
+    <p>更新资源包后，可以预览当前课程的更新。批量操作用本地模板判断是否写过代码，已改动的题目保留原来的资源版本。「无法确认」表示工具找不到可靠的原始模板作为对照，这些题也会保留原版本。可以先看预览再决定；以后也可以在 Companion 的「设置 → 更新课程资源」中处理。</p>
+    <pre>课程 …/C-lang-course
+新题使用 0.6.7 · 可更新 12 道旧题 · 保留 2 道
+保留原因：已改动 1 道 · 无法确认 1 道</pre>
+  </article>
 </section>
 <footer>适用版本 <strong>Accoding Companion @VERSION@</strong></footer>
 </main>
 <script>
+  const modules = Array.from(document.querySelectorAll("main > section"));
+  const links = Array.from(document.querySelectorAll("nav a"));
+  const controls = document.createElement("div");
+  controls.className = "pages";
+  controls.innerHTML = '<button type="button">上一页</button><span aria-live="polite"></span><button type="button">下一页</button>';
+  const [previous, next] = controls.querySelectorAll("button");
+  const slides = modules.map(module => [...module.querySelectorAll(":scope > article")]);
+  const position = controls.querySelector("span");
+  let current = -1;
+  let page = 0;
+
+  function readLocation() {
+    const [id, step] = location.hash.slice(1).split("/");
+    const module = Math.max(0, modules.findIndex(section => section.id === id));
+    const index = Number(step);
+    return { module, page: Number.isInteger(index) && index > 0 && index <= slides[module].length ? index - 1 : 0 };
+  }
+
+  function render(focus = false) {
+    const target = readLocation();
+    current = target.module;
+    page = target.page;
+    const section = modules[current];
+    const pages = slides[current];
+    modules.forEach((module, index) => { module.hidden = index !== current; });
+    pages.forEach((slide, index) => { slide.hidden = index !== page; });
+    links.forEach(link => {
+      if (link.hash === "#" + section.id) link.setAttribute("aria-current", "location");
+      else link.removeAttribute("aria-current");
+    });
+    previous.disabled = current === 0 && page === 0;
+    next.disabled = current === modules.length - 1 && page === pages.length - 1;
+    position.textContent = `第 ${page + 1} / ${pages.length} 步`;
+    section.append(controls);
+    if (focus) {
+      const heading = pages[page].querySelector("h3");
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+      section.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function move(direction) {
+    let module = current;
+    let index = page + direction;
+    if (index >= slides[module].length) {
+      module++;
+      index = 0;
+    } else if (index < 0) {
+      module--;
+      if (module >= 0) index = slides[module].length - 1;
+    }
+    if (!modules[module]) return;
+    location.hash = modules[module].id + (index === 0 ? "" : `/${index + 1}`);
+  }
+
+  previous.onclick = () => move(-1);
+  next.onclick = () => move(1);
+  window.addEventListener("hashchange", () => render(true));
+  document.addEventListener("keydown", event => {
+    if (document.querySelector("dialog[open]") || event.altKey || event.ctrlKey || event.metaKey ||
+        event.target.closest("a, button, pre")) return;
+    if (event.key === "ArrowLeft" && !previous.disabled) { event.preventDefault(); previous.click(); }
+    if (event.key === "ArrowRight" && !next.disabled) { event.preventDefault(); next.click(); }
+  });
+  render();
   const dialog = document.getElementById("contest-image");
   document.getElementById("contest-preview").addEventListener("click", event => {
     if (typeof dialog.showModal === "function") {

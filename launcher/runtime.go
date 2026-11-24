@@ -162,32 +162,7 @@ func installNode(root string) (nodeRuntime, error) {
 }
 
 func downloadNode(file, name, digest string) error {
-	client := http.Client{Timeout: 4 * time.Minute}
-	response, err := client.Get("https://nodejs.org/dist/" + nodeVersion + "/" + name)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("下载 Node.js 返回 %s", response.Status)
-	}
-	output, err := os.Create(file)
-	if err != nil {
-		return err
-	}
-	hash := sha256.New()
-	_, err = io.Copy(io.MultiWriter(output, hash), io.LimitReader(response.Body, 200<<20))
-	closeErr := output.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if hex.EncodeToString(hash.Sum(nil)) != digest {
-		return fmt.Errorf("Node.js 下载校验失败")
-	}
-	return nil
+	return downloadArchive("https://nodejs.org/dist/"+nodeVersion+"/"+name, file, digest, 200<<20)
 }
 
 func extractRuntime(archive, root string) error {
@@ -266,4 +241,56 @@ func extractRuntime(archive, root string) error {
 			}
 		}
 	}
+}
+
+func downloadArchive(url, destination, digest string, maxSize int64) error {
+	client := http.Client{Timeout: 8 * time.Minute}
+	response, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("下载返回 %s", response.Status)
+	}
+	output, err := os.Create(destination)
+	if err != nil {
+		return err
+	}
+	hash := sha256.New()
+	total := response.ContentLength
+	var writer io.Writer = io.MultiWriter(output, hash)
+	if total > 0 {
+		writer = io.MultiWriter(writer, &downloadProgress{total: total})
+	}
+	size, copyErr := io.Copy(writer, io.LimitReader(response.Body, maxSize+1))
+	closeErr := output.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if size > maxSize || hex.EncodeToString(hash.Sum(nil)) != digest {
+		return fmt.Errorf("下载文件校验失败")
+	}
+	return nil
+}
+
+type downloadProgress struct {
+	total, bytes int64
+	step         int
+}
+
+func (p *downloadProgress) Write(data []byte) (int, error) {
+	p.bytes += int64(len(data))
+	step := int(min(10*p.bytes/p.total, 10))
+	if step > p.step {
+		p.step = step
+		fmt.Printf("\r[%s%s] %d%%", strings.Repeat("█", step), strings.Repeat("░", 10-step), step*10)
+		if step == 10 {
+			fmt.Println()
+		}
+	}
+	return len(data), nil
 }
