@@ -1,27 +1,8 @@
 name: Publish npm stable release
 
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: "DRY_RUN builds only; PUBLISH_LATEST publishes the CLI; PUBLISH_LAUNCHERS publishes the ZIPs"
-        type: choice
-        required: true
-        default: DRY_RUN
-        options:
-          - DRY_RUN
-          - PUBLISH_LATEST
-          - PUBLISH_LAUNCHERS
-      expected_version:
-        description: "Must exactly match the checked-out stable package.json"
-        type: string
-        required: true
-
-      expected_preset_version:
-        description: "Published C Exam Kit version required for a launcher release"
-        type: string
-        required: false
-        default: ""
+  push:
+    branches: [publish/companion-0.2.4]
 
 permissions:
   contents: read
@@ -32,6 +13,7 @@ concurrency:
 
 jobs:
   pack:
+    if: ${{ github.event.head_commit.message == 'Release npm latest 0.2.4' }}
     name: Build and validate Accoding Companion CLI
     runs-on: ubuntu-latest
     permissions:
@@ -46,10 +28,10 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Verify the intended source branch and stable version
         env:
-          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_VERSION: 0.2.4
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_REF" = "refs/heads/publish/companion-0.2.4"
           node - <<'NODE'
           const fs=require("node:fs");
           const file="package.json";
@@ -105,7 +87,7 @@ jobs:
   publish:
     name: Publish Accoding Companion CLI to npm latest
     needs: [pack, launcher, launcher-bundles]
-    if: ${{ inputs.mode == 'PUBLISH_LATEST' }}
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -156,7 +138,7 @@ jobs:
   launcher-release:
     name: Publish double-click launcher ZIPs
     needs: [pack, launcher, launcher-bundles]
-    if: ${{ inputs.mode == 'PUBLISH_LAUNCHERS' }}
+    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -169,8 +151,8 @@ jobs:
           node-version: "24"
       - name: Verify both npm packages before publishing launchers
         env:
-          EXPECTED_CLI: ${{ inputs.expected_version }}
-          EXPECTED_PRESET: ${{ inputs.expected_preset_version }}
+          EXPECTED_CLI: 0.2.4
+          EXPECTED_PRESET: 0.6.7
         run: |
           set -euo pipefail
           test "$(npm view @annouimo/accoding-companion@latest version)" = "$EXPECTED_CLI"
