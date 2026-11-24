@@ -232,7 +232,7 @@ await scenario("structured manual supports variants, search, copy, resume and re
 
 function prepareReferenceCourse(env) {
   prepareSampleCourse(env);
-  const reference={schemaVersion:1,notes:"下标从零开始。",categories:[{title:"输入和输出",entries:[{
+  const reference={schemaVersion:1,notes:"## 开始使用\n保留题目原有头文件引用。\n\n## 下标与区间\n下标从零开始。",categories:[{title:"输入和输出",entries:[{
     id:"read_number",title:"读一个数",description:"读取一个数。",keywords:["数字","EOF"],
     signatures:["int read_int(void);","long long read_ll(void);","double read_double(void);"],example:"int x = read_int();",
     variants:[["int","int","read_int"],["ll","long long","read_ll"],["double","double","read_double"]].map(([key,label,name])=>({
@@ -273,6 +273,9 @@ await scenario("reference stays navigable in a narrow short terminal", async ctx
   ctx.send("\t"); await ctx.expect("[long long]");
   ctx.send("c"); await ctx.expect("已复制完整示例");
   assert.equal(await fs.readFile(path.join(ctx.home,"clipboard.txt"),"utf8"),"long long x = read_ll();");
+  ctx.send("g"); await ctx.expect("分类目录"); await ctx.expect("❯ 输入与输出");
+  ctx.send("u"); await ctx.expect("使用约定"); await ctx.expect("开始使用");
+  await ctx.expect("下标与区间");
   ctx.send("g"); await ctx.expect("分类目录"); await ctx.expect("❯ 输入与输出");
   ctx.send("h"); await ctx.expect("❯ 独立题目"); ctx.send("q");
 }, prepareReferenceCourse, "rows 20 cols 64");
