@@ -17,7 +17,7 @@ if (process.platform !== "linux") {
 const bundle = path.resolve(process.argv[2] || "dist/accoding.mjs");
 await fs.access(bundle);
 
-async function scenario(name, run, prepare) {
+async function scenario(name, run, prepare, dimensions = "rows 16 cols 84") {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-pty-"));
   const env = { ...process.env, HOME: home,
     XDG_CONFIG_HOME: path.join(home, ".config"),
@@ -25,7 +25,7 @@ async function scenario(name, run, prepare) {
     CI: "false", TERM: "xterm-256color", NO_COLOR: "1",
     PATH: process.env.PATH };
   prepare?.(env);
-  const command = (prepare ? "stty rows 16 cols 84; exec " : "") +
+  const command = (prepare ? 'tty > "$HOME/pty-device"; stty ' + dimensions + "; exec " : "") +
     JSON.stringify(process.execPath) + " " + JSON.stringify(bundle);
   const child = spawn("script", ["-q", "-e", "-c", command, "/dev/null"],
     { env, stdio: ["pipe", "pipe", "pipe"] });
@@ -52,7 +52,11 @@ async function scenario(name, run, prepare) {
     child.stdin.write(value);
   }
   try {
-    await run({ expect, send, home, alive: () => !finished });
+    await run({ expect, send, home, alive: () => !finished, resize: async (rows, cols) => {
+      const device = (await fs.readFile(path.join(home,"pty-device"),"utf8")).trim();
+      execFileSync("stty",["-F",device,"rows",String(rows),"cols",String(cols)]);
+      await delay(200);
+    } });
     const deadline = Date.now() + 9000;
     while (!finished && Date.now() < deadline) await delay(40);
     assert.ok(finished, name + ": process did not finish\n" + tail());
@@ -207,7 +211,9 @@ await scenario("structured manual supports variants, search, copy, resume and re
   ctx.send("h"); await ctx.expect("❯ 输入与输出");
   ctx.send("\r"); await ctx.expect("❯ 数字读写");
   ctx.send("\r"); await ctx.expect("❯ 读一个数");
-  ctx.send("\r"); await ctx.expect("[int]"); await ctx.expect("int x = read_int();");
+  await ctx.expect("用途"); await ctx.expect("读取一个数。");
+  ctx.send("\r"); await ctx.expect("[int]"); await ctx.expect("函数接口"); await ctx.expect("使用说明");
+  await ctx.expect("调用示例"); await ctx.expect("int x = read_int();");
   ctx.send("\t"); await ctx.expect("[long long]"); await ctx.expect("long long x = read_ll();");
   ctx.send("c"); await ctx.expect("已复制完整示例");
   assert.equal(await fs.readFile(path.join(ctx.home,"clipboard.txt"),"utf8"),"long long x = read_ll();");
@@ -218,13 +224,15 @@ await scenario("structured manual supports variants, search, copy, resume and re
   await ctx.expect("[double]"); await ctx.expect("double x = read_double();");
   ctx.send("r"); await ctx.expect("❯ 读数组");
   ctx.send("\r"); await ctx.expect("读数组");
-  await ctx.expect("扩展接口 · 显式容量");
+  ctx.send("\x1b[6~"); await ctx.expect("扩展接口 · 显式容量");
   await ctx.expect("read_ints_into(int *a, int n, size_t capacity);");
   ctx.send("\x1b"); await ctx.expect("[double]"); await ctx.expect("double x = read_double();");
   ctx.send("h"); await ctx.expect("❯ 独立题目"); ctx.send("q");
-}, env => {
+}, prepareReferenceCourse, "rows 20 cols 64");
+
+function prepareReferenceCourse(env) {
   prepareSampleCourse(env);
-  const reference={schemaVersion:1,notes:"下标从零开始。",categories:[{title:"输入和输出",entries:[{
+  const reference={schemaVersion:1,notes:"## 开始使用\n保留题目原有头文件引用。\n\n## 下标与区间\n下标从零开始。",categories:[{title:"输入和输出",entries:[{
     id:"read_number",title:"读一个数",description:"读取一个数。",keywords:["数字","EOF"],
     signatures:["int read_int(void);","long long read_ll(void);","double read_double(void);"],example:"int x = read_int();",
     variants:[["int","int","read_int"],["ll","long long","read_ll"],["double","double","read_double"]].map(([key,label,name])=>({
@@ -251,7 +259,26 @@ await scenario("structured manual supports variants, search, copy, resume and re
   execFileSync("sh",["-c","cat > \"$HOME/xclip\"; chmod +x \"$HOME/xclip\""],{
     env,input:'#!/bin/sh\ncat > "$HOME/clipboard.txt"\n'
   });
-});
+}
+
+await scenario("reference stays navigable in a narrow short terminal", async ctx => {
+  await ctx.expect("❯ 运行样例");
+  ctx.send("\x1b"); await ctx.expect("❯ A · 样例表格");
+  ctx.send("\x1b"); await ctx.expect("❯ 独立题目");
+  ctx.send("h"); await ctx.expect("分类目录"); await ctx.expect("❯ 输入与输出");
+  await ctx.resize(12,38);
+  ctx.send("\r"); await ctx.expect("❯ 数字读写");
+  ctx.send("\r"); await ctx.expect("❯ 读一个数");
+  ctx.send("\r"); await ctx.expect("[int]"); await ctx.expect("函数接口");
+  ctx.send("\t"); await ctx.expect("[long long]");
+  ctx.send("c"); await ctx.expect("已复制完整示例");
+  assert.equal(await fs.readFile(path.join(ctx.home,"clipboard.txt"),"utf8"),"long long x = read_ll();");
+  ctx.send("g"); await ctx.expect("分类目录"); await ctx.expect("❯ 输入与输出");
+  ctx.send("u"); await ctx.expect("使用约定"); await ctx.expect("开始使用");
+  await ctx.expect("下标与区间");
+  ctx.send("g"); await ctx.expect("分类目录"); await ctx.expect("❯ 输入与输出");
+  ctx.send("h"); await ctx.expect("❯ 独立题目"); ctx.send("q");
+}, prepareReferenceCourse, "rows 20 cols 64");
 
 await scenario("password form stays open until cancelled", async ctx => {
   await ctx.expect("❯ 导入"); await delay(250); ctx.send("\x1b[B");

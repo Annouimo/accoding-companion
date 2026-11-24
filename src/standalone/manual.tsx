@@ -5,7 +5,7 @@ import MarkdownIt from "markdown-it";
 import stringWidth from "string-width";
 
 type Span = { text: string; color?: string; bold?: boolean; dim?: boolean };
-type Line = { spans: Span[]; code?: boolean };
+type Line = { spans: Span[]; code?: boolean; example?: boolean };
 type Section = { title: string; lines: Line[] };
 
 const markdown = new MarkdownIt({ html: false });
@@ -107,6 +107,64 @@ function layout(line: Line, width: number, offset: number): Span[][] {
   return rows;
 }
 
+// Measure terminal cells, not UTF-16 characters; Chinese and wide glyphs occupy two cells.
+export function fitCells(value: string, width: number, ellipsis = true): string {
+  const text = safeText(value).replace(/\n/g, " ");
+  if (stringWidth(text) <= width) return text;
+  if (width <= 0) return "";
+  const suffix = ellipsis ? "…" : "";
+  let result = "", used = 0;
+  for (const {segment} of graphemes.segment(text)) {
+    const size = stringWidth(segment);
+    if (used + size + stringWidth(suffix) > width) break;
+    result += segment; used += size;
+  }
+  return result + suffix;
+}
+export function breadcrumb(parts: string[], width: number): string {
+  const full = parts.join(" › ");
+  if (stringWidth(full) <= width) return full;
+  if (parts.length > 2) {
+    const shortened = parts[0] + " › … › " + parts[parts.length - 1];
+    if (stringWidth(shortened) <= width) return shortened;
+  }
+  const last = parts[parts.length - 1] ?? "";
+  return fitCells("… › " + last, width);
+}
+function hintRows(hints: string[], width: number): string[] {
+  const result: string[] = [];
+  let row = "";
+  for (const hint of hints) {
+    const next = row ? row + " · " + hint : hint;
+    if (row && stringWidth(next) > width) { result.push(row); row = hint; }
+    else row = next;
+  }
+  if (row) result.push(row);
+  return result.map(row=>fitCells(row,width));
+}
+function sectionHeading(text: string, hint?: string): Line {
+  return {spans: [{text, color: "cyan", bold: true}, ...(hint ? [{text:"  ·  "+hint,dim:true}] : [])]};
+}
+function previewLines(description: string, width: number, limit: number): Span[][] {
+  const first = sectionsOf(description).flatMap(s=>s.lines).find(l=>l.spans.length);
+  if (!first || limit < 1) return [];
+  const lines = layout(first,width,0);
+  if (lines.length <= limit) return lines;
+  const visible = lines.slice(0,limit);
+  const last = visible[limit-1].map(s=>s.text).join("");
+  visible[limit-1] = [{text:fitCells(last,width-1,false)+"…"}];
+  return visible;
+}
+function RenderLine({spans, width, example=false}: {spans: Span[]; width: number; example?: boolean}) {
+  const padding = Math.max(0,width-spans.reduce((n,s)=>n+stringWidth(s.text),0));
+  // A subtle, fixed dark code surface with matching foreground colors works on both terminal themes.
+  const palette: Record<string,string> = {cyan:"#8bdbe9",green:"#9ee0a5",yellow:"#f1d68b"};
+  return <Text wrap="truncate-end" backgroundColor={example?"#242a30":undefined}
+    color={example?"#e5e7eb":undefined}>{spans.length?spans.map((span,j)=>
+      <Text key={j} bold={span.bold} color={example?(span.dim?"#a7afb8":palette[span.color??""]??"#e5e7eb"):span.color}
+        dimColor={!example&&span.dim}>{span.text}</Text>):" "}{example?" ".repeat(Math.max(0,padding-(spans.length?0:1))):""}</Text>;
+}
+
 export type Variant = { key: string; label: string; symbols: string[]; signatures: string[]; note: string; example: string; advancedSignatures?: string[] };
 type Entry = { id: string; title: string; signatures: string[]; description: string; example: string;
   keywords?: string[]; commonSignatures?: string[]; advancedSignatures?: string[]; related?: string[]; variants?: Variant[] };
@@ -173,7 +231,7 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
   const [status,setStatus] = useState("");
   const [relatedCursor,setRelatedCursor] = useState<number>();
   const {columns,rows} = useWindowSize();
-  const width = Math.max(8,(columns||80)-2), height = Math.max(1,(rows||24)-6);
+  const width = Math.max(1,(columns||80)-2), screenRows = rows||24;
   const all = useMemo(()=>new Map(reference.categories.flatMap(c=>c.entries.map(e=>[e.id,e] as const))),[reference]);
   const item = view.id ? all.get(view.id) : undefined;
   const variant = item?.variants?.find(v=>v.key===view.selectedType) ??
@@ -199,29 +257,70 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
   }
   const detailCrumbs = item ? (entryCrumbs(reference.sections,item.id) ?? crumbs) : crumbs;
   const results = useMemo(()=>searchReference(reference,view.query),[reference,view.query]);
-  const choices = view.searching ? results.map(r=>({title:r.entry.title,id:r.entry.id,summary:r.category+" · "+(r.entry.description.split("\n")[0]??""),variant:r.variant})) :
-    leaf?.entries ? leaf.entries.map(id=>({title:all.get(id)!.title,id,summary:all.get(id)!.description.split("\n")[0]??"",variant:undefined})) :
-    nodes.map(n=>({title:n.title,id:undefined,summary:"",variant:undefined}));
+  const choices = view.searching ? results.map(r=>({title:r.entry.title,id:r.entry.id,summary:r.entry.description,location:r.category,variant:r.variant})) :
+    leaf?.entries ? leaf.entries.map(id=>({title:all.get(id)!.title,id,summary:all.get(id)!.description,location:"",variant:undefined})) :
+    nodes.map(n=>({title:n.title,id:undefined,summary:"",location:"",variant:undefined}));
   const cursor = view.searching ? view.searchCursor : view.cursor;
   const reading = Boolean(item || view.notes);
+  const title = relatedCursor!==undefined ? "相关操作" : item?.title ?? (view.notes?"使用约定":view.searching?"搜索":leaf?.title??"分类目录");
+  const ancestors = item ? detailCrumbs : view.searching||view.notes ? [] : crumbs.slice(0,-1);
+  const pathParts = relatedCursor!==undefined&&item ? [...detailCrumbs,item.title] : ancestors;
+  const compact = screenRows < 18;
+  const tiny = screenRows < 9;
+  const showPath = pathParts.length>0 && !tiny;
+  const showBrand = !tiny;
+  const showRule = !compact;
+  const variants = reading&&relatedCursor===undefined ? item?.variants : undefined;
+  const showVariant = Boolean(variants?.length);
+  const showSearch = view.searching&&!reading&&relatedCursor===undefined;
+  const headerHeight = 1+Number(showBrand)+Number(showPath)+Number(showRule)+Number(showVariant)+Number(showSearch);
+  const hints = relatedCursor!==undefined?["Esc 取消","↑↓ 选择","Enter 打开"]:
+    showSearch?["Esc 取消","↑↓ 选择","Enter 打开"]:
+    reading?["Esc 返回","H 关闭","/ 搜索","G 首页","↑↓ 滚动",...(view.notes?[]:["←→ 长代码"])]:
+    ["Esc 返回","H 关闭","/ 搜索","↑↓ 选择","Enter 打开","G 首页","U 使用约定"];
+  const footer = hintRows(hints,width).slice(0,tiny?1:Math.min(3,Math.max(1,Math.floor(screenRows/6))));
+  const statusHeight = tiny?0:1;
+  const footerRule = !compact;
+  // One spare row avoids forcing terminals to scroll when the last cell is filled.
+  const height = Math.max(1,screenRows-headerHeight-footer.length-statusHeight-Number(footerRule)-1);
   const lines = useMemo(()=>{
-    if(view.notes) return sectionsOf(reference.notes || "此资源版本没有独立使用约定。").flatMap(s=>s.lines);
+    if(view.notes) return sectionsOf(reference.notes || "此资源版本没有独立使用约定。").flatMap(section=>[
+      ...(section.title==="使用约定"?[]:[sectionHeading(section.title)]),
+      ...section.lines
+    ]);
     if(!item) return [];
     const signatures = variant ? [...(item.commonSignatures??[]),...variant.signatures] : item.signatures;
     const advanced = [...(item.advancedSignatures??[]),...(variant?.advancedSignatures??[])];
     const normal = signatures.filter(s=>!advanced.includes(s));
     const prose = (text:string)=>sectionsOf(text).flatMap(s=>s.lines);
-    const result: Line[] = [{spans:[{text:"接口",bold:true,dim:true}]},...codeLines(normal.join("\n"),"c"),{spans:[]}];
+    const result: Line[] = [sectionHeading("函数接口"),...codeLines(normal.join("\n"),"c"),{spans:[]}];
+    if(item.description||variant?.note) result.push(sectionHeading("使用说明"));
     if(item.description) result.push(...prose(item.description));
-    if(variant?.note) result.push(...prose(variant.note));
-    if(example) result.push({spans:[{text:"示例 · C 复制代码",bold:true,dim:true}]},...codeLines(example,"c"));
-    if(advanced.length) result.push({spans:[]},{spans:[{text:"扩展接口 · 显式容量",bold:true,dim:true}]},...codeLines(advanced.join("\n"),"c"));
-    if(related.length) result.push({spans:[]},{spans:[{text:"相关操作 · R 打开",bold:true,dim:true}]},...prose(related.map(e=>e.title).join(" · ")));
+    if(variant?.note) result.push(...prose(variant.note).map(l=>({...l,spans:l.spans.map(s=>({...s,color:s.color??"yellow"}))})));
+    if(example) result.push(sectionHeading("调用示例","C 复制代码"),...codeLines(example,"c").map(l=>({...l,example:true})));
+    if(advanced.length) result.push({spans:[]},sectionHeading("扩展接口 · 显式容量"),...codeLines(advanced.join("\n"),"c"));
+    if(related.length) result.push({spans:[]},sectionHeading("相关操作","R 打开"),...prose(related.map(e=>e.title).join(" · ")));
     return result;
   },[item,variant,example,view.notes,reference.notes,all]);
-  const body = useMemo(()=>lines.flatMap(l=>layout(l,width,view.left)),[lines,width,view.left]);
+  const maxLeft = Math.max(0,Math.max(0,...lines.filter(l=>l.code).map(l=>l.spans.reduce((n,s)=>n+stringWidth(s.text),0)))-width);
+  const left=Math.min(view.left,maxLeft);
+  const body = useMemo(()=>lines.flatMap(l=>layout(l,width,left).map(spans=>({spans,example:l.example}))),[lines,width,left]);
   const maxTop = Math.max(0,body.length-height), top=Math.min(view.top,maxTop);
-  const maxLeft = Math.max(0,...lines.filter(l=>l.code).map(l=>l.spans.reduce((n,s)=>n+stringWidth(s.text),0)))-width;
+  const selected = choices[cursor];
+  const previewLimit = Math.max(0,Math.min(3,height-2-Math.min(4,choices.length)));
+  const preview = !reading&&relatedCursor===undefined&&selected?.summary ?
+    previewLines(selected.summary,width,previewLimit) : [];
+  const previewHeading = selected?.location ? "用途 · "+selected.location : "用途";
+  const previewHeight = preview.length ? preview.length+2 : 0;
+  const menuHeight = Math.max(1,height-previewHeight);
+  const menuTop = Math.max(0,Math.min(cursor,choices.length-1)-menuHeight+1);
+  const relatedTop = Math.max(0,(relatedCursor??0)-height+1);
+  const statusText = status || (reading&&relatedCursor===undefined ?
+    [ "行 "+(body.length?top+1:0)+"–"+Math.min(top+height,body.length)+" / "+body.length,
+      ...(maxLeft>0?["列 "+(left+1)+"–"+(left+width)]:[]),
+      ...(example?["C 复制"]:[]),...(related.length?["R 相关"]:[])].join(" · ") :
+    relatedCursor!==undefined ? (relatedCursor+1)+" / "+related.length :
+    choices.length ? (cursor+1)+" / "+choices.length : "");
   function patch(change:Partial<ReferenceView>) {setView(old=>({...old,...change}));setStatus("");}
   function back() {
     if(relatedCursor!==undefined) {setRelatedCursor(undefined);return;}
@@ -249,19 +348,19 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
     }
     if(!reading&&view.searching) {
       if(key.return) select();
-      else if(key.upArrow||key.downArrow||key.pageUp||key.pageDown) patch({searchCursor:Math.max(0,Math.min(choices.length-1,cursor+(key.upArrow?-1:key.downArrow?1:key.pageUp?-height:height)))});
+      else if(key.upArrow||key.downArrow||key.pageUp||key.pageDown) patch({searchCursor:Math.max(0,Math.min(choices.length-1,cursor+(key.upArrow?-1:key.downArrow?1:key.pageUp?-menuHeight:menuHeight)))});
       else if(key.backspace||key.delete) patch({query:Array.from(view.query).slice(0,-1).join(""),searchCursor:0});
       else if(!key.ctrl&&!key.meta&&input) patch({query:view.query+safeText(input).replace(/[\r\n]/g,""),searchCursor:0});
       return;
     }
     if(input.toLowerCase()==="h"&&!key.ctrl&&!key.meta) {save(view);onBack();return;}
     if(input==="/"&&!key.ctrl) {patch({searching:true,query:"",searchCursor:0,id:undefined,notes:false,top:0,left:0,trail:undefined});return;}
-    if(input.toLowerCase()==="g"&&!key.ctrl) {patch({...initialReferenceView(),type:view.type});return;}
+    if(input.toLowerCase()==="g"&&!key.ctrl) {patch({...initialReferenceView(),type:view.type,id:undefined,selectedType:undefined,trail:undefined});return;}
     if(!reading) {
       if(input.toLowerCase()==="u"&&!key.ctrl) {patch({notes:true,top:0,left:0});return;}
       if(key.return) select();
       else if(choices.length&&(key.upArrow||key.downArrow||key.pageUp||key.pageDown))
-        patch({cursor:Math.max(0,Math.min(choices.length-1,cursor+(key.upArrow?-1:key.downArrow?1:key.pageUp?-height:height)))});
+        patch({cursor:Math.max(0,Math.min(choices.length-1,cursor+(key.upArrow?-1:key.downArrow?1:key.pageUp?-menuHeight:menuHeight)))});
       return;
     }
     if(input.toLowerCase()==="r"&&!key.ctrl&&related.length) {setRelatedCursor(0);return;}
@@ -271,27 +370,46 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
       patch({type:next.key,selectedType:next.key,top:0,left:0});
     } else if(input.toLowerCase()==="c"&&!key.ctrl&&example) {
       void copyExample(example).then(()=>setStatus("已复制完整示例"),e=>setStatus("复制失败："+String(e instanceof Error?e.message:e)));
-    } else if(key.leftArrow||key.rightArrow) patch({left:Math.max(0,Math.min(maxLeft,view.left+(key.leftArrow?-8:8)))});
+    } else if(key.leftArrow||key.rightArrow) patch({left:Math.max(0,Math.min(maxLeft,left+(key.leftArrow?-8:8)))});
     else if(key.upArrow||key.downArrow||key.pageUp||key.pageDown) patch({top:Math.max(0,Math.min(maxTop,top+(key.upArrow?-1:key.downArrow?1:key.pageUp?-height:height)))});
   });
-  const menuHeight = Math.max(1,height-(view.searching?1:0));
-  const menuTop = Math.max(0,Math.min(cursor,choices.length-1)-menuHeight+1);
+  const brand = "C 函数速查", versionLabel = "v"+version;
+  const brandSpace = Math.max(1,width-stringWidth(brand)-stringWidth(versionLabel));
+  const brandLine = stringWidth(brand)+stringWidth(versionLabel)+1<=width ?
+    brand+" ".repeat(brandSpace)+versionLabel : fitCells(brand+" · "+versionLabel,width);
+  const rule = "─".repeat(width);
+  const viewRows = relatedCursor!==undefined ? Math.min(height,related.length-relatedTop) :
+    reading ? Math.min(height,body.length-top) : Math.max(1,Math.min(menuHeight,choices.length-menuTop))+previewHeight;
+  const blankRows = Math.max(0,height-viewRows);
+  // The selected tab is always visible, even when other tabs have to be omitted on a narrow terminal.
+  const fullTabs = (variants??[]).map(v=>v===variant?"["+v.label+"]":" "+v.label+" ").join(" ");
+  const showAllTabs = stringWidth(fullTabs)<=width;
+  const tabHint = "  Tab 切换";
   return <Box flexDirection="column" paddingX={1}>
-    <Text bold wrap="truncate-end">C 函数速查 · {version}{detailCrumbs.length?" › "+detailCrumbs.join(" › "):""}{item?" › "+item.title:view.notes?" › 使用约定":""}</Text>
-    {relatedCursor!==undefined ? <>
-      <Text bold>相关操作</Text>
-      {related.map((e,i)=><Text key={e.id} color={relatedCursor===i?"cyan":undefined}>{relatedCursor===i?"❯ ":"  "}{safeText(e.title)}</Text>)}
-    </> : reading ? <>
-      {item?.variants?.length ? <Text wrap="truncate-end">{item.variants.map(v=><Text key={v.key} bold={v===variant} color={v===variant?"cyan":undefined}>{v===variant?"["+v.label+"]":v.label}  </Text>)}<Text dimColor>Tab 切换类型</Text></Text>:null}
-      {body.slice(top,top+height).map((line,i)=><Text key={i} wrap="truncate-end">{line.length?line.map((span,j)=><Text key={j} bold={span.bold} color={span.color} dimColor={span.dim}>{span.text}</Text>):" "}</Text>)}
-      <Text dimColor wrap="truncate-end">{status||("行 "+(body.length?top+1:0)+"–"+Math.min(top+height,body.length)+" / "+body.length)}</Text>
-    </> : <>
-      {view.searching?<Text color="cyan" wrap="truncate-end">搜索：{view.query}▏ · {results.length} 项</Text>:null}
-      {choices.slice(menuTop,menuTop+menuHeight).map((choice,i)=><Text key={i} wrap="truncate-end" color={i+menuTop===cursor?"cyan":undefined}>{i+menuTop===cursor?"❯ ":"  "}{safeText(choice.title)}{choice.summary?<Text dimColor> · {safeText(choice.summary)}</Text>:null}</Text>)}
-      {!choices.length?<Text dimColor>{view.searching?"输入函数名或中文用途开始搜索":"没有条目"}</Text>:null}
+    {showBrand?<Text dimColor wrap="truncate-end">{brandLine}</Text>:null}
+    {showPath?<Text dimColor wrap="truncate-end">{breadcrumb(pathParts,width)}</Text>:null}
+    <Text bold wrap="truncate-end">{fitCells(title,width)}</Text>
+    {showRule?<Text dimColor wrap="truncate-end">{rule}</Text>:null}
+    {showVariant?<Text wrap="truncate-end">{showAllTabs?variants!.map((v,i)=>
+      <Text key={v.key}>{i?" ":""}<Text inverse={v===variant} bold={v===variant} dimColor={v!==variant}>{v===variant?"["+v.label+"]":" "+v.label+" "}</Text></Text>):
+      <Text inverse bold>{fitCells("["+variant!.label+"]",width)}</Text>}
+      {stringWidth(showAllTabs?fullTabs:"["+variant!.label+"]")+stringWidth(tabHint)<=width?<Text dimColor>{tabHint}</Text>:null}</Text>:null}
+    {showSearch?<Text color="cyan" wrap="truncate-end">{fitCells("搜索："+view.query+"▏ · "+results.length+" 项",width)}</Text>:null}
+    {relatedCursor!==undefined ? related.slice(relatedTop,relatedTop+height).map((e,i)=>
+      <Text key={e.id} wrap="truncate-end" bold={relatedCursor===i+relatedTop} color={relatedCursor===i+relatedTop?"cyan":undefined}>{relatedCursor===i+relatedTop?"❯ ":"  "}{fitCells(e.title,width-2)}</Text>)
+    : reading ? body.slice(top,top+height).map((line,i)=><RenderLine key={i} spans={line.spans} width={width} example={line.example}/>)
+    : <>
+      {choices.slice(menuTop,menuTop+menuHeight).map((choice,i)=><Text key={i} wrap="truncate-end"
+        color={i+menuTop===cursor?"cyan":undefined} bold={i+menuTop===cursor}>
+        {i+menuTop===cursor?"❯ ":"  "}{fitCells(choice.title,width-2)}</Text>)}
+      {!choices.length?<Text dimColor wrap="truncate-end">{fitCells(showSearch?"输入函数名或中文用途开始搜索":"没有条目",width)}</Text>:null}
+      {preview.length?<><Text dimColor wrap="truncate-end">{rule}</Text><Text bold color="cyan" wrap="truncate-end">{fitCells(previewHeading,width)}</Text>
+        {preview.map((line,i)=><RenderLine key={i} spans={line} width={width}/>)}</>:null}
     </>}
-    <Text dimColor wrap="truncate-end">{relatedCursor!==undefined?"Esc 取消 · ↑↓ 选择 · Enter 打开":reading?"Esc 返回 · H 关闭 · / 搜索 · ↑↓ 翻页"+(example?" · C 复制":"")+(related.length?" · R 相关":""):
-      view.searching?"Esc 取消 · ↑↓ 选择 · Enter 打开":"Esc 返回 · H 关闭 · G 首页 · / 搜索 · U 使用约定 · Enter 打开"}</Text>
+    {Array.from({length:blankRows},(_,i)=><Text key={i}> </Text>)}
+    {footerRule?<Text dimColor wrap="truncate-end">{rule}</Text>:null}
+    {statusHeight?<Text dimColor wrap="truncate-end">{fitCells(statusText,width)||" "}</Text>:null}
+    {footer.map((line,i)=><Text key={i} dimColor wrap="truncate-end">{line}</Text>)}
   </Box>;
 }
 
