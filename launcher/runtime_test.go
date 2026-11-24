@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -59,21 +58,3 @@ func TestInstalledMenuOnlyShowsAvailableActions(t *testing.T) {
 	}
 }
 
-func TestManagedGCCFromChinesePath(t *testing.T) {
-	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" || os.Getenv("ACCODING_TEST_GCC_DOWNLOAD") != "1" {
-		t.Skip("requires Windows x64 and the pinned compiler download")
-	}
-	root := filepath.Join(t.TempDir(), "中文 路径")
-	if err := os.MkdirAll(root, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := installWindowsCompiler(root, root); err != nil {
-		t.Fatal(err)
-	}
-	for _, probe := range compilerProbes {
-		executable := filepath.Join(managedCompilerBin(root), probe.command+".exe")
-		if err := checkCompiler(root, executable, probe, true); err != nil {
-			t.Fatal(err)
-		}
-	}
-}

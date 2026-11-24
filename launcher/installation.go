@@ -106,11 +106,6 @@ func install(root, installed string, available updateResult) (string, error) {
 			return "", fmt.Errorf("安装 Node.js：%w", err)
 		}
 	}
-	if installed == "" {
-		if err := checkWindowsCompilers(root); err != nil {
-			return "", fmt.Errorf("安装 C / C++ 编译器：%w", err)
-		}
-	}
 	progress(2, "确认安装版本")
 	cli, preset := available.cli, available.preset
 	if installed == "" {

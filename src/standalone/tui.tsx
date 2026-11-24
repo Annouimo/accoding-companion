@@ -304,9 +304,21 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     });
   }
 
+  function configureCompiler() {
+    open({ title: "设置编译器", rows: (["c", "cpp"] as const).map(language => ({
+      id: language, label: (language === "c" ? "C" : "C++") + " · " +
+        ((language === "c" ? state?.compilerC : state?.compilerCpp) || "系统默认"),
+      run: () => open({ title: "编译器可执行文件路径（auto 恢复系统默认）", input: async value => {
+        const executable = value.trim().replace(/^"(.*)"$/, "$1");
+        if (executable) await run("正在保存…", () => app.setCompiler(language, executable === "auto" ? "" : executable));
+      } })
+    })) });
+  }
+
   function settings() {
     open({ title: "课程设置", rows: [
       { id: "workspace", label: "切换或新建课程", run: chooseWorkspace },
+      { id: "compiler", label: "设置 C / C++ 编译器", run: configureCompiler },
       ...(root ? [{ id: "preset", label: "更新课程资源", run: presets }] : []),
       { id: "login", label: app.session.user ? "切换账号" : "登录 Accoding", run: login },
       ...(app.session.user ? [{ id: "logout", label: "退出登录", run: async () => {

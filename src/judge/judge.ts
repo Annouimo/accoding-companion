@@ -111,6 +111,10 @@ export async function compile(
     return { result, program, directory, sourceHash: hash(code) };
   } catch (error) {
     await fs.rm(directory, { recursive: true, force: true });
+    if (error instanceof Error && (error.cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT" &&
+        await fs.stat(cwd).then(info => info.isDirectory(), () => false)) {
+      throw new Error(`未找到 ${isC ? "C" : "C++"} 编译器（${configuredCompiler}）。请安装编译器，或在设置中指定已有编译器。具体方法见《使用说明》。`, { cause: error });
+    }
     throw error;
   }
 }

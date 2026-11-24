@@ -230,12 +230,12 @@ async function tui(app: StandaloneWorkflow): Promise<void> {
       } else if (extra === "compiler") {
         const state = await app.state.load();
         const selected = await select("选择要设置的编译器", [
-          { label: "C（当前：" + (state.compilerC || "自动检测") + "）", value: "c" },
-          { label: "C++（当前：" + (state.compilerCpp || "自动检测") + "）", value: "cpp" }
+          { label: "C（当前：" + (state.compilerC || "系统默认") + "）", value: "c" },
+          { label: "C++（当前：" + (state.compilerCpp || "系统默认") + "）", value: "cpp" }
         ]);
         if (selected) {
           const previous = selected === "c" ? state.compilerC : state.compilerCpp;
-          const compiler = await ask("编译器可执行文件路径（输入 auto 恢复自动检测）",
+          const compiler = await ask("编译器可执行文件路径（输入 auto 恢复系统默认）",
             previous || "auto");
           await app.setCompiler(selected as "c" | "cpp", compiler === "auto" ? "" : compiler);
         }

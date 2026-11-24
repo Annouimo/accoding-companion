@@ -70,13 +70,26 @@ Annouimo · https://github.com/Annouimo/accoding-companion
   使用说明</pre>
   </article>
   <article><h3>跟随进度完成安装</h3>
-    <p>选择「安装」并按回车。保持联网，启动器会准备 Node.js，安装 Companion 和 C Exam Kit。Windows x64 会先检查已有的 GCC 和 G++。如果缺少可用的编译器，启动器会下载约 251 MiB 的便携版，显示下载进度，并自动验证。Windows ARM64 可以在 Companion 的设置里指定已有编译器。</p>
+    <p>选择「安装」并按回车。保持联网，启动器会准备 Node.js，安装 Companion 和 C Exam Kit。启动器不安装或检查 C/C++ 编译器；即使没有编译器，也可以正常安装和启动。</p>
     <p class="tip">下载期间让启动器保持打开。若因断网失败，恢复联网后返回首页，重新选「安装」。看到「安装已就绪」后即可启动。</p>
     <pre>[█░░░░] 1/5 检查运行环境
 [██░░░] 2/5 确认安装版本
 [███░░] 3/5 安装 Companion … 和 C Exam Kit …
 [████░] 4/5 验证安装文件
 [█████] 5/5 安装完成</pre>
+  </article>
+  <article><h3>准备 C/C++ 编译环境</h3>
+    <p>如果已经可以在终端中调用编译器，或者已经在 Companion 中配置了编译器，可跳过本页。本地测试需要编译器，但安装、登录和查看题目不需要。</p>
+    <h4>Windows：安装 GCC（或使用已有 Dev-C++）</h4>
+    <p>没有编译器时，可以在 PowerShell 中通过 WinGet 安装 WinLibs（适用于 x64 Windows；其他架构请使用兼容的编译器）。</p>
+    <pre>winget install --id BrechtSanders.WinLibs.POSIX.UCRT -e</pre>
+    <p>安装后关闭并重新打开终端及启动器，用下面的命令检查版本。如果找不到命令，检查用户 PATH 是否包含编译器的 bin 目录。备用方案是 <a href="https://www.msys2.org/">MSYS2</a>。</p>
+    <pre>gcc --version
+g++ --version</pre>
+    <p>已有 Dev-C++ 时无需重复安装：打开 Dev-C++ 的编译器设置，找到编译器所在的 bin 文件夹。例如 <code>TDM-GCC-64\bin</code> 或 <code>MinGW64\bin</code>。在 Windows 搜索「编辑账户的环境变量」，编辑用户 Path，新增这个完整目录；不要覆盖原有条目。重新打开启动器。也可以在 Companion 的「设置 → 设置 C / C++ 编译器」中分别填写 gcc.exe、g++.exe 的完整路径，输入 auto 恢复系统默认。</p>
+    <h4>macOS / Linux</h4>
+    <p>macOS 在终端执行 <code>xcode-select --install</code>，安装 Apple 命令行开发工具；Ubuntu / Debian 执行 <code>sudo apt install build-essential</code>。其他 Linux 发行版使用自己的包管理器。检查 <code>cc --version</code> 和 <code>c++ --version</code>，再尝试运行样例。</p>
+    <p class="tip">如果 Companion 报告找不到编译器，请检查以上设置。普通语法或链接报错应根据编译器输出处理，不必重复安装。</p>
   </article>
   <article><h3>启动并登录</h3>
     <p>看到「安装已就绪」，按回车启动 Companion。在「设置」选「登录 Accoding」。用 <kbd>Tab</kbd> 切换字段，<kbd>Space</kbd> 勾选保持登录，再按 <kbd>Enter</kbd>。使用课程平台的 Accoding 账号。共用电脑上可以让「保持登录」保持未勾选。</p>
