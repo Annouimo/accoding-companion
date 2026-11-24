@@ -265,7 +265,7 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
   const title = relatedCursor!==undefined ? "相关操作" : item?.title ?? (view.notes?"使用约定":view.searching?"搜索":leaf?.title??"分类目录");
   const ancestors = item ? detailCrumbs : view.searching||view.notes ? [] : crumbs.slice(0,-1);
   const pathParts = relatedCursor!==undefined&&item ? [...detailCrumbs,item.title] : ancestors;
-  const compact = screenRows < 14;
+  const compact = screenRows < 18;
   const tiny = screenRows < 9;
   const showPath = pathParts.length>0 && !tiny;
   const showBrand = !tiny;
@@ -278,7 +278,7 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
     showSearch?["Esc 取消","↑↓ 选择","Enter 打开"]:
     reading?["Esc 返回","H 关闭","/ 搜索","G 首页","↑↓ 滚动","←→ 长代码"]:
     ["Esc 返回","H 关闭","/ 搜索","↑↓ 选择","Enter 打开","G 首页","U 使用约定"];
-  const footer = hintRows(hints,width).slice(0,compact?1:2);
+  const footer = hintRows(hints,width).slice(0,tiny?1:Math.min(3,Math.max(1,Math.floor(screenRows/6))));
   const statusHeight = tiny?0:1;
   const footerRule = !compact;
   // One spare row avoids forcing terminals to scroll when the last cell is filled.
@@ -304,8 +304,9 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
   const body = useMemo(()=>lines.flatMap(l=>layout(l,width,left).map(spans=>({spans,example:l.example}))),[lines,width,left]);
   const maxTop = Math.max(0,body.length-height), top=Math.min(view.top,maxTop);
   const selected = choices[cursor];
-  const preview = !reading&&relatedCursor===undefined&&selected?.summary&&height>=5 ?
-    previewLines(selected.summary,width,Math.min(3,Math.max(1,height-3))) : [];
+  const previewLimit = Math.max(0,Math.min(3,height-2-Math.min(4,choices.length)));
+  const preview = !reading&&relatedCursor===undefined&&selected?.summary ?
+    previewLines(selected.summary,width,previewLimit) : [];
   const previewHeading = selected?.location ? "用途 · "+selected.location : "用途";
   const previewHeight = preview.length ? preview.length+2 : 0;
   const menuHeight = Math.max(1,height-previewHeight);
