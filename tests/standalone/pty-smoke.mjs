@@ -200,7 +200,7 @@ await scenario("missing compiler opens the local HTML guide only after a test re
 });
 
 
-await scenario("structured manual supports variant search, copy and resume", async ctx => {
+await scenario("structured manual supports variants, search, copy, resume and related navigation", async ctx => {
   await ctx.expect("❯ 运行样例");
   ctx.send("\x1b"); await ctx.expect("❯ A · 样例表格");
   ctx.send("\x1b"); await ctx.expect("❯ 独立题目");
@@ -216,6 +216,11 @@ await scenario("structured manual supports variant search, copy and resume", asy
   ctx.send("/"); await ctx.expect("搜索：");
   ctx.send("read_double"); await ctx.expect("读一个数"); ctx.send("\r");
   await ctx.expect("[double]"); await ctx.expect("double x = read_double();");
+  ctx.send("r"); await ctx.expect("❯ 读数组");
+  ctx.send("\r"); await ctx.expect("读数组");
+  await ctx.expect("扩展接口 · 显式容量");
+  await ctx.expect("read_ints_into(int *a, int n, size_t capacity);");
+  ctx.send("\x1b"); await ctx.expect("[double]"); await ctx.expect("double x = read_double();");
   ctx.send("h"); await ctx.expect("❯ 独立题目"); ctx.send("q");
 }, env => {
   prepareSampleCourse(env);
@@ -224,8 +229,11 @@ await scenario("structured manual supports variant search, copy and resume", asy
     signatures:["int read_int(void);","long long read_ll(void);","double read_double(void);"],example:"int x = read_int();",
     variants:[["int","int","read_int"],["ll","long long","read_ll"],["double","double","read_double"]].map(([key,label,name])=>({
       key,label,symbols:[name],signatures:[label+" "+name+"(void);"],example:label+" x = "+name+"();",note:""
-    })),commonSignatures:[]
-  }]}],sections:[{title:"输入与输出",children:[{title:"数字读写",entries:["read_number"]}]}]};
+    })),commonSignatures:[],related:["read_arrays"]
+  },{id:"read_arrays",title:"读数组",description:"读取数组。",example:"int a[3]; read_ints(a, 3);",
+      signatures:["read_ints(a, n)","void read_ints_into(int *a, int n, size_t capacity);"],
+      advancedSignatures:["void read_ints_into(int *a, int n, size_t capacity);"],related:["read_number"]
+  }]}],sections:[{title:"输入与输出",children:[{title:"数字读写",entries:["read_number"]},{title:"数组读写",entries:["read_arrays"]}]}]};
   execFileSync(process.execPath,["--input-type=module","-e",`
     import fs from "node:fs";
     import path from "node:path";
