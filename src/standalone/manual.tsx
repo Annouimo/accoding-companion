@@ -276,7 +276,7 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
   const headerHeight = 1+Number(showBrand)+Number(showPath)+Number(showRule)+Number(showVariant)+Number(showSearch);
   const hints = relatedCursor!==undefined?["Esc 取消","↑↓ 选择","Enter 打开"]:
     showSearch?["Esc 取消","↑↓ 选择","Enter 打开"]:
-    reading?["Esc 返回","H 关闭","/ 搜索","G 首页","↑↓ 滚动","←→ 长代码"]:
+    reading?["Esc 返回","H 关闭","/ 搜索","G 首页","↑↓ 滚动",...(view.notes?[]:["←→ 长代码"])]:
     ["Esc 返回","H 关闭","/ 搜索","↑↓ 选择","Enter 打开","G 首页","U 使用约定"];
   const footer = hintRows(hints,width).slice(0,tiny?1:Math.min(3,Math.max(1,Math.floor(screenRows/6))));
   const statusHeight = tiny?0:1;
@@ -284,7 +284,10 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
   // One spare row avoids forcing terminals to scroll when the last cell is filled.
   const height = Math.max(1,screenRows-headerHeight-footer.length-statusHeight-Number(footerRule)-1);
   const lines = useMemo(()=>{
-    if(view.notes) return sectionsOf(reference.notes || "此资源版本没有独立使用约定。").flatMap(s=>s.lines);
+    if(view.notes) return sectionsOf(reference.notes || "此资源版本没有独立使用约定。").flatMap(section=>[
+      ...(section.title==="使用约定"?[]:[sectionHeading(section.title)]),
+      ...section.lines
+    ]);
     if(!item) return [];
     const signatures = variant ? [...(item.commonSignatures??[]),...variant.signatures] : item.signatures;
     const advanced = [...(item.advancedSignatures??[]),...(variant?.advancedSignatures??[])];
