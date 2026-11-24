@@ -78,31 +78,15 @@ Annouimo · https://github.com/Annouimo/accoding-companion
 [████░] 4/5 验证安装文件
 [█████] 5/5 安装完成</pre>
   </article>
-  <article><h3>启动并登录</h3>
-    <p>看到「安装已就绪」，按回车启动 Companion。在「设置」选「登录 Accoding」。用 <kbd>Tab</kbd> 切换字段，<kbd>Space</kbd> 勾选保持登录，再按 <kbd>Enter</kbd>。使用课程平台的 Accoding 账号。共用电脑上可以让「保持登录」保持未勾选。</p>
-    <pre>登录 Accoding
-  用户名  …
-  密码    …
-  保持登录</pre>
+  <article><h3>启动 Companion</h3>
+    <p>看到「安装已就绪」，按回车启动 Companion。首次打开时，首页通常只有「导入」和「设置」。接下来先找到要导入的比赛，不必提前进入设置配置账号或课程文件夹。</p>
+    <pre>Accoding Companion
+❯ 导入
+  设置</pre>
   </article>
 </section>
 <section id="course">
   <h2>课程文件夹和比赛</h2>
-  <article><h3>选择课程文件夹</h3>
-    <p>在「设置」选「切换或新建课程」。课程文件夹是用来归放这门课所有比赛和题目的总目录。选择已有文件夹或输入新目录，然后选 C 或 C++。</p>
-    <p class="tip">可以粘贴完整路径，也可以把已打开的课程文件夹拖进终端。已有课程代码时，选存放各场比赛的那一层。单场比赛目录和单题目录应放在这一层下面。</p>
-    <pre>选择课程的编程语言
-❯ C
-  C++</pre>
-    <p>例如下面应选择 <code>C-lang-course</code> 这一层。每场比赛有自己的文件夹，每道题又有自己的子文件夹。</p>
-    <div class="example">
-      <ul><li><strong>C-lang-course/</strong>
-        <ul><li>R-2026级C语言程序设计期末复习赛/
-          <ul><li>A-来岁昭昭的签到表/ · 题目.md、main.c</li><li>AA-gcd-lcm quiz/ · 题目.md、main.c</li></ul>
-        </li><li>E8-2026级C语言程序设计第八次练习赛/</li></ul>
-      </li></ul>
-    </div>
-  </article>
   <article><h3>在 Accoding 找到比赛 ID</h3>
     <p>打开课程，选择左侧「课程比赛」。在比赛标题同一行的第一列找到「比赛ID」。期末复习赛这行是 <strong>1359</strong>。</p>
   <figure>
@@ -120,10 +104,34 @@ Annouimo · https://github.com/Annouimo/accoding-companion
   </dialog>
 
   </article>
-  <article><h3>输入比赛 ID</h3>
-    <p>回到 Companion，选择「导入 → 导入比赛 / 作业」。输入 <code>1359</code> 并回车。导入后，打开该比赛，再选题目编号。如果列表里没找到比赛，先核对比赛 ID 和当前登录的课程账号。</p>
-    <pre>导入比赛 / 作业
-比赛 ID  1359</pre>
+  <article><h3>导入比赛并登录</h3>
+    <p>回到 Companion，选择「导入 → 导入比赛 / 作业」。如果尚未登录，软件会自动打开 Accoding 登录界面。输入课程平台的账号和密码，用 <kbd>Tab</kbd> 切换字段，<kbd>Space</kbd> 勾选保持登录，再按 <kbd>Enter</kbd>。共用电脑上建议不勾选保持登录。</p>
+    <pre>登录 Accoding
+  用户名  …
+  密码    …
+  保持登录</pre>
+    <p>登录成功后，软件会继续显示「比赛 ID」输入框。输入刚才找到的 <code>1359</code>，按回车。如果已经登录，会直接进入这一步。</p>
+    <pre>比赛 ID
+1359</pre>
+    <p class="tip">如果导入失败，先核对比赛 ID 和当前登录的课程账号。</p>
+  </article>
+  <article><h3>首次配置课程文件夹</h3>
+    <p>首次导入时，如果还没有配置课程，输入比赛 ID 后，Companion 会提示「课程目录（可粘贴或拖入路径）」。课程文件夹是存放这门课所有比赛和题目的总目录。粘贴已有文件夹的完整路径，或输入希望新建的目录路径，按回车。首次配置该目录时，再选择 C 或 C++。</p>
+    <p class="tip">可以粘贴完整路径，也可以把已打开的课程文件夹拖进终端。已有课程代码时，选存放各场比赛的那一层。单场比赛目录和单题目录应放在这一层下面。</p>
+    <pre>课程目录（可粘贴或拖入路径）
+…/C-lang-course</pre>
+    <pre>选择课程的编程语言
+❯ C
+  C++</pre>
+    <p>例如下面应选择 <code>C-lang-course</code> 这一层。每场比赛有自己的文件夹，每道题又有自己的子文件夹。</p>
+    <div class="example">
+      <ul><li><strong>C-lang-course/</strong>
+        <ul><li>R-2026级C语言程序设计期末复习赛/
+          <ul><li>A-来岁昭昭的签到表/ · 题目.md、main.c</li><li>AA-gcd-lcm quiz/ · 题目.md、main.c</li></ul>
+        </li><li>E8-2026级C语言程序设计第八次练习赛/</li></ul>
+      </li></ul>
+    </div>
+    <p>完成配置后，软件会继续导入比赛。导入完成后，打开比赛，再选择题目编号。以后导入同一门课的其他比赛时，会使用当前课程文件夹，不必重新配置。若要切换到另一门课程，再使用「设置 → 切换或新建课程」。</p>
   </article>
 </section>
 <section id="solve">
