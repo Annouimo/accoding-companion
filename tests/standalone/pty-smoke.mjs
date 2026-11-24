@@ -139,7 +139,9 @@ await scenario("sample table starts at the difference and scrolls within a 16-ro
   ctx.send("\x1b");
   await ctx.expect("本地样例 1/2 通过");
   ctx.send("q");
-}, env => {
+}, prepareSampleCourse);
+
+function prepareSampleCourse(env) {
   execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
     import fs from "node:fs/promises";
     import path from "node:path";
@@ -171,7 +173,30 @@ import { stripVTControlCharacters } from "node:util";
     saved.tuiPage = { root, group: "independent", problem: "problem-123" };
     await state.save(saved);
   `], { env, stdio: "inherit" });
+}
+
+await scenario("missing compiler opens the local HTML guide only after a test request", async ctx => {
+  await ctx.expect("❯ 运行样例");
+  const marker = path.join(ctx.home, "compiler-guide-opened");
+  await assert.rejects(fs.access(marker));
+  ctx.send("\r");
+  await ctx.expect("未找到 C 编译器");
+  await ctx.expect("编译环境配置");
+  for (let i = 0; i < 50; i++) {
+    if (await fs.access(marker).then(() => true, () => false)) break;
+    await delay(40);
+  }
+  const opened = (await fs.readFile(marker, "utf8")).trim();
+  assert.equal(opened, path.resolve("docs/launcher/编译环境配置.html"));
+  await fs.access(opened);
+  ctx.send("q");
+}, env => {
+  prepareSampleCourse(env);
+  env.ACCODING_CC = "accoding-test-nonexistent-compiler";
+  env.PATH = env.HOME + path.delimiter + env.PATH;
+  execFileSync("sh", ["-c", 'printf \'#!/bin/sh\\nprintf "%s\\\\n" "$1" >> "$HOME/compiler-guide-opened"\\n\' > "$HOME/xdg-open"; chmod +x "$HOME/xdg-open"'], {env});
 });
+
 
 await scenario("password form stays open until cancelled", async ctx => {
   await ctx.expect("❯ 导入"); await delay(250); ctx.send("\x1b[B");
