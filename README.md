@@ -51,7 +51,7 @@ node dist/accoding.mjs status --watch
 
 从 [最新发布页](https://github.com/Annouimo/accoding-companion/releases/latest) 下载对应平台的启动包并完整解压。Windows 双击 `Accoding Launcher.exe`，macOS 双击 `Accoding Launcher.command`。首次先选「安装」，完成后选「启动」。使用说明 HTML 随包提供，首次启动时打开。Linux 可使用下面的 npm 命令。
 
-函数手册随 C Exam Kit preset 0.6.6 起提供。按 H 在 Companion 中打开对应版本的函数速查。新版速查按分类、条目和详情浏览，同类函数可在详情页对照使用。新版资源只分发程序内速查数据，旧工作区可以继续阅读已保存的 Markdown 手册。
+函数手册随 C Exam Kit preset 0.6.6 起提供。按 H 在 Companion 中打开对应版本的函数速查。新版速查按操作分类浏览；`/` 搜索函数名或中文用途，Tab / Shift+Tab 切换类型，C 复制当前完整示例，R 跳转相关条目，U 查看使用约定，G 返回首页，H 关闭并保留阅读位置。旧版资源仍可阅读，但不一定提供全部结构化字段。新版资源只分发程序内速查数据，旧工作区可以继续阅读已保存的 Markdown 手册。
 
 启动器检查 Node.js、主程序和 C Exam Kit。首次安装完成后返回启动菜单，按 Enter 即可启动。已安装时可直接选择「启动」；有更新时会显示对应的软件与资源版本。断网时仍可启动本机已安装的 Companion。
 

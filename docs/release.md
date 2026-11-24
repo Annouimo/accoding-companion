@@ -21,16 +21,16 @@
 
 ## 正式发布顺序
 
-涉及新资源格式时，以 0.2.4 / 0.6.7 为例：
+涉及新资源格式时，以 0.2.5 / 0.6.8 为例：
 
 1. 确认目标提交已合入 main，所有必要回归测试通过。HTML 定稿必须经过用户认可。
-2. 在 Companion 的 [Publish npm stable release](https://github.com/Annouimo/accoding-companion/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.2.4`。如只检查构建则使用 `DRY_RUN`。
-3. 验证 `npm view @annouimo/accoding-companion@latest version` 已返回 0.2.4。
-4. 在 C Exam Kit 的 [Publish npm stable release](https://github.com/Annouimo/c-exam-kit/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.6.7`。
-5. 验证 `npm view @annouimo/c-exam-kit-preset@latest version` 已返回 0.6.7。npm 的版本验证未完成时不要抢先发布启动器。
-6. 回到 Companion 发布工作流选择 main、`PUBLISH_LAUNCHERS`、`expected_version=0.2.4`、`expected_preset_version=0.6.7`。工作流将核对两个 npm latest 版本后创建 GitHub Release 并上传四个 ZIP。
+2. 在 Companion 的 [Publish npm stable release](https://github.com/Annouimo/accoding-companion/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.2.5`。如只检查构建则使用 `DRY_RUN`。
+3. 验证 `npm view @annouimo/accoding-companion@latest version` 已返回 0.2.5。
+4. 在 C Exam Kit 的 [Publish npm stable release](https://github.com/Annouimo/c-exam-kit/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.6.8`。
+5. 验证 `npm view @annouimo/c-exam-kit-preset@latest version` 已返回 0.6.8。npm 的版本验证未完成时不要抢先发布启动器。
+6. 回到 Companion 发布工作流选择 main、`PUBLISH_LAUNCHERS`、`expected_version=0.2.5`、`expected_preset_version=0.6.8`。工作流将核对两个 npm latest 版本后创建 GitHub Release 并上传四个 ZIP。
 7. 检查下载入口与版本号，解压后做实际首次安装和启动验收。
 
-仅更新资源内容且不改变格式时，可单独发布资源包。不要为失败的构建或未发布的修复增加版本号；如果版本已经发布到 npm，则不能覆盖该版本。
+仅更新资源内容且不改变格式时，可单独发布资源包。已有原生启动器可直接更新两个 npm 包；ZIP 内的使用说明是独立文件，需重新下载新版 ZIP 才会同步更新。不要为失败的构建或未发布的修复增加版本号；如果版本已经发布到 npm，则不能覆盖该版本。
 
 正式 npm 发布使用 Trusted Publishing/OIDC；不在源码或工作流中保存长期 npm 令牌。

@@ -200,6 +200,59 @@ await scenario("missing compiler opens the local HTML guide only after a test re
 });
 
 
+await scenario("structured manual supports variants, search, copy, resume and related navigation", async ctx => {
+  await ctx.expect("❯ 运行样例");
+  ctx.send("\x1b"); await ctx.expect("❯ A · 样例表格");
+  ctx.send("\x1b"); await ctx.expect("❯ 独立题目");
+  ctx.send("h"); await ctx.expect("❯ 输入与输出");
+  ctx.send("\r"); await ctx.expect("❯ 数字读写");
+  ctx.send("\r"); await ctx.expect("❯ 读一个数");
+  ctx.send("\r"); await ctx.expect("[int]"); await ctx.expect("int x = read_int();");
+  ctx.send("\t"); await ctx.expect("[long long]"); await ctx.expect("long long x = read_ll();");
+  ctx.send("c"); await ctx.expect("已复制完整示例");
+  assert.equal(await fs.readFile(path.join(ctx.home,"clipboard.txt"),"utf8"),"long long x = read_ll();");
+  ctx.send("h"); await ctx.expect("❯ 独立题目");
+  ctx.send("h"); await ctx.expect("[long long]"); await ctx.expect("long long x = read_ll();");
+  ctx.send("/"); await ctx.expect("搜索：");
+  ctx.send("read_double"); await ctx.expect("读一个数"); ctx.send("\r");
+  await ctx.expect("[double]"); await ctx.expect("double x = read_double();");
+  ctx.send("r"); await ctx.expect("❯ 读数组");
+  ctx.send("\r"); await ctx.expect("读数组");
+  await ctx.expect("扩展接口 · 显式容量");
+  await ctx.expect("read_ints_into(int *a, int n, size_t capacity);");
+  ctx.send("\x1b"); await ctx.expect("[double]"); await ctx.expect("double x = read_double();");
+  ctx.send("h"); await ctx.expect("❯ 独立题目"); ctx.send("q");
+}, env => {
+  prepareSampleCourse(env);
+  const reference={schemaVersion:1,notes:"下标从零开始。",categories:[{title:"输入和输出",entries:[{
+    id:"read_number",title:"读一个数",description:"读取一个数。",keywords:["数字","EOF"],
+    signatures:["int read_int(void);","long long read_ll(void);","double read_double(void);"],example:"int x = read_int();",
+    variants:[["int","int","read_int"],["ll","long long","read_ll"],["double","double","read_double"]].map(([key,label,name])=>({
+      key,label,symbols:[name],signatures:[label+" "+name+"(void);"],example:label+" x = "+name+"();",note:""
+    })),commonSignatures:[],related:["read_arrays"]
+  },{id:"read_arrays",title:"读数组",description:"读取数组。",example:"int a[3]; read_ints(a, 3);",
+      signatures:["read_ints(a, n)","void read_ints_into(int *a, int n, size_t capacity);"],
+      advancedSignatures:["void read_ints_into(int *a, int n, size_t capacity);"],related:["read_number"]
+  }]}],sections:[{title:"输入与输出",children:[{title:"数字读写",entries:["read_number"]},{title:"数组读写",entries:["read_arrays"]}]}]};
+  execFileSync(process.execPath,["--input-type=module","-e",`
+    import fs from "node:fs";
+    import path from "node:path";
+    const root=path.join(process.env.HOME,"sample-course");
+    const settingsPath=path.join(root,".accoding","workspace.json");
+    const settings=JSON.parse(fs.readFileSync(settingsPath,"utf8"));
+    settings.presetVersion="0.6.7";
+    fs.writeFileSync(settingsPath,JSON.stringify(settings));
+    const dir=path.join(root,".accoding","presets","0.6.7");
+    fs.mkdirSync(dir,{recursive:true});
+    fs.writeFileSync(path.join(dir,"reference.json"),process.env.TEST_REFERENCE);
+  `],{env:{...env,TEST_REFERENCE:JSON.stringify(reference)}});
+  env.PATH=env.HOME+path.delimiter+env.PATH;
+  delete env.WAYLAND_DISPLAY;
+  execFileSync("sh",["-c","cat > \"$HOME/xclip\"; chmod +x \"$HOME/xclip\""],{
+    env,input:'#!/bin/sh\ncat > "$HOME/clipboard.txt"\n'
+  });
+});
+
 await scenario("password form stays open until cancelled", async ctx => {
   await ctx.expect("❯ 导入"); await delay(250); ctx.send("\x1b[B");
   await ctx.expect("❯ 设置"); ctx.send("\r");
