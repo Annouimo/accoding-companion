@@ -194,7 +194,9 @@ await scenario("missing compiler opens the local HTML guide only after a test re
   prepareSampleCourse(env);
   env.ACCODING_CC = "accoding-test-nonexistent-compiler";
   env.PATH = env.HOME + path.delimiter + env.PATH;
-  execFileSync("sh", ["-c", 'printf \'#!/bin/sh\\nprintf "%s\\\\n" "$1" >> "$HOME/compiler-guide-opened"\\n\' > "$HOME/xdg-open"; chmod +x "$HOME/xdg-open"'], {env});
+  execFileSync("sh", ["-c", "cat > \"$HOME/xdg-open\"; chmod +x \"$HOME/xdg-open\""], {
+    env, input: '#!/bin/sh\nprintf "%s\\n" "$1" >> "$HOME/compiler-guide-opened"\n'
+  });
 });
 
 
