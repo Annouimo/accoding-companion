@@ -352,7 +352,7 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
     }
     if(input.toLowerCase()==="h"&&!key.ctrl&&!key.meta) {save(view);onBack();return;}
     if(input==="/"&&!key.ctrl) {patch({searching:true,query:"",searchCursor:0,id:undefined,notes:false,top:0,left:0,trail:undefined});return;}
-    if(input.toLowerCase()==="g"&&!key.ctrl) {patch({...initialReferenceView(),type:view.type});return;}
+    if(input.toLowerCase()==="g"&&!key.ctrl) {patch({...initialReferenceView(),type:view.type,id:undefined,selectedType:undefined,trail:undefined});return;}
     if(!reading) {
       if(input.toLowerCase()==="u"&&!key.ctrl) {patch({notes:true,top:0,left:0});return;}
       if(key.return) select();
