@@ -107,9 +107,9 @@ function layout(line: Line, width: number, offset: number): Span[][] {
   return rows;
 }
 
-export type Variant = { key: string; label: string; symbols: string[]; signatures: string[]; note: string; example: string };
+export type Variant = { key: string; label: string; symbols: string[]; signatures: string[]; note: string; example: string; advancedSignatures?: string[] };
 type Entry = { id: string; title: string; signatures: string[]; description: string; example: string;
-  keywords?: string[]; commonSignatures?: string[]; variants?: Variant[] };
+  keywords?: string[]; commonSignatures?: string[]; advancedSignatures?: string[]; related?: string[]; variants?: Variant[] };
 type Category = { title: string; entries: Entry[] };
 type SectionNode = { title: string; children?: SectionNode[]; entries?: string[] };
 export type Reference = { categories: Category[]; sections: SectionNode[]; notes: string };
@@ -124,15 +124,19 @@ export function parseReference(raw: string): Reference {
         .every(value => typeof value === "string") && strings(item.signatures) &&
         (item.keywords === undefined || strings(item.keywords)) &&
         (item.commonSignatures === undefined || strings(item.commonSignatures)) &&
+        (item.advancedSignatures === undefined || strings(item.advancedSignatures)) &&
+        (item.related === undefined || strings(item.related)) &&
         (item.variants === undefined || (Array.isArray(item.variants) && item.variants.length > 0 &&
           item.variants.every(v => [v?.key, v?.label, v?.note, v?.example].every(x => typeof x === "string") &&
-            strings(v.symbols) && strings(v.signatures)) &&
+            strings(v.symbols) && strings(v.signatures) &&
+            (v.advancedSignatures === undefined || strings(v.advancedSignatures))) &&
           new Set(item.variants.map(v=>v.key)).size === item.variants.length)))))
     throw new Error("无法读取此版本的函数速查数据。");
   const categories: Category[] = data.categories;
   const entries = categories.flatMap(c => c.entries);
   const ids = new Set(entries.map(e => e.id));
   if (ids.size !== entries.length) throw new Error("函数速查条目 ID 重复。");
+  if (entries.some(e=>e.related?.some(id=>id===e.id || !ids.has(id)))) throw new Error("相关条目引用无效。");
   function valid(nodes: unknown, depth = 0): nodes is SectionNode[] {
     return depth <= 8 && Array.isArray(nodes) && nodes.length > 0 && nodes.every(n =>
       n && typeof n.title === "string" &&
@@ -145,7 +149,7 @@ export function parseReference(raw: string): Reference {
 }
 
 export type ReferenceView = { path: number[]; cursor: number; id?: string; top: number; left: number;
-  type?: string; selectedType?: string; searching: boolean; query: string; searchCursor: number; notes: boolean };
+  type?: string; selectedType?: string; searching: boolean; query: string; searchCursor: number; notes: boolean; trail?: {id: string; selectedType?: string; top: number; left: number}[] };
 export const initialReferenceView = (): ReferenceView =>
   ({path:[],cursor:0,top:0,left:0,searching:false,query:"",searchCursor:0,notes:false});
 
@@ -167,6 +171,7 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
 }) {
   const [view,setView] = useState(initial);
   const [status,setStatus] = useState("");
+  const [relatedCursor,setRelatedCursor] = useState<number>();
   const {columns,rows} = useWindowSize();
   const width = Math.max(8,(columns||80)-2), height = Math.max(1,(rows||24)-6);
   const all = useMemo(()=>new Map(reference.categories.flatMap(c=>c.entries.map(e=>[e.id,e] as const))),[reference]);
@@ -174,6 +179,7 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
   const variant = item?.variants?.find(v=>v.key===view.selectedType) ??
     item?.variants?.find(v=>v.key===view.type) ?? item?.variants?.[0];
   const example = variant?.example ?? item?.example ?? "";
+  const related = (item?.related ?? []).map(id=>all.get(id)!).filter(Boolean);
   let nodes = reference.sections;
   let leaf: SectionNode | undefined;
   const crumbs: string[] = [];
@@ -184,6 +190,14 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
     leaf = node;
     nodes = node.children ?? [];
   }
+  function entryCrumbs(nodes: SectionNode[], id: string): string[] | undefined {
+    for (const n of nodes) {
+      if(n.entries?.includes(id)) return [n.title];
+      const sub=n.children&&entryCrumbs(n.children,id);
+      if(sub) return [n.title,...sub];
+    }
+  }
+  const detailCrumbs = item ? (entryCrumbs(reference.sections,item.id) ?? crumbs) : crumbs;
   const results = useMemo(()=>searchReference(reference,view.query),[reference,view.query]);
   const choices = view.searching ? results.map(r=>({title:r.entry.title,id:r.entry.id,summary:r.category+" · "+(r.entry.description.split("\n")[0]??""),variant:r.variant})) :
     leaf?.entries ? leaf.entries.map(id=>({title:all.get(id)!.title,id,summary:all.get(id)!.description.split("\n")[0]??"",variant:undefined})) :
@@ -194,19 +208,25 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
     if(view.notes) return sectionsOf(reference.notes || "此资源版本没有独立使用约定。").flatMap(s=>s.lines);
     if(!item) return [];
     const signatures = variant ? [...(item.commonSignatures??[]),...variant.signatures] : item.signatures;
+    const advanced = [...(item.advancedSignatures??[]),...(variant?.advancedSignatures??[])];
+    const normal = signatures.filter(s=>!advanced.includes(s));
     const prose = (text:string)=>sectionsOf(text).flatMap(s=>s.lines);
-    const result: Line[] = [{spans:[{text:"接口",bold:true,dim:true}]},...codeLines(signatures.join("\n"),"c"),{spans:[]}];
+    const result: Line[] = [{spans:[{text:"接口",bold:true,dim:true}]},...codeLines(normal.join("\n"),"c"),{spans:[]}];
     if(item.description) result.push(...prose(item.description));
     if(variant?.note) result.push(...prose(variant.note));
     if(example) result.push({spans:[{text:"示例 · C 复制代码",bold:true,dim:true}]},...codeLines(example,"c"));
+    if(advanced.length) result.push({spans:[]},{spans:[{text:"扩展接口 · 显式容量",bold:true,dim:true}]},...codeLines(advanced.join("\n"),"c"));
+    if(related.length) result.push({spans:[]},{spans:[{text:"相关操作 · R 打开",bold:true,dim:true}]},...prose(related.map(e=>e.title).join(" · ")));
     return result;
-  },[item,variant,example,view.notes,reference.notes]);
+  },[item,variant,example,view.notes,reference.notes,all]);
   const body = useMemo(()=>lines.flatMap(l=>layout(l,width,view.left)),[lines,width,view.left]);
   const maxTop = Math.max(0,body.length-height), top=Math.min(view.top,maxTop);
   const maxLeft = Math.max(0,...lines.filter(l=>l.code).map(l=>l.spans.reduce((n,s)=>n+stringWidth(s.text),0)))-width;
   function patch(change:Partial<ReferenceView>) {setView(old=>({...old,...change}));setStatus("");}
   function back() {
-    if(reading) patch({id:undefined,notes:false,top:0,left:0});
+    if(relatedCursor!==undefined) {setRelatedCursor(undefined);return;}
+    if(reading&&view.trail?.length) patch({...view.trail[view.trail.length-1],trail:view.trail.slice(0,-1)});
+    else if(reading) patch({id:undefined,notes:false,top:0,left:0,trail:undefined});
     else if(view.searching) patch({searching:false,query:"",searchCursor:0});
     else if(view.path.length) patch({path:view.path.slice(0,-1),cursor:view.path[view.path.length-1]});
     else {save(view);onBack();}
@@ -214,11 +234,19 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
   function select() {
     const choice=choices[cursor];
     if(!choice) return;
-    if(choice.id) patch({id:choice.id,selectedType:choice.variant,top:0,left:0});
+    if(choice.id) patch({id:choice.id,selectedType:choice.variant,top:0,left:0,trail:undefined});
     else patch({path:[...view.path,cursor],cursor:0});
   }
   useInput((input,key)=>{
     if(key.escape || (key.ctrl&&input==="c")) {back();return;}
+    if(relatedCursor!==undefined) {
+      if(key.upArrow||key.downArrow) setRelatedCursor((relatedCursor+related.length+(key.upArrow?-1:1))%related.length);
+      else if(key.return&&item&&related[relatedCursor]) {
+        patch({id:related[relatedCursor].id,selectedType:undefined,top:0,left:0,trail:[...(view.trail??[]),{id:item.id,selectedType:view.selectedType,top:view.top,left:view.left}]});
+        setRelatedCursor(undefined);
+      }
+      return;
+    }
     if(!reading&&view.searching) {
       if(key.return) select();
       else if(key.upArrow||key.downArrow||key.pageUp||key.pageDown) patch({searchCursor:Math.max(0,Math.min(choices.length-1,cursor+(key.upArrow?-1:key.downArrow?1:key.pageUp?-height:height)))});
@@ -227,7 +255,7 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
       return;
     }
     if(input.toLowerCase()==="h"&&!key.ctrl&&!key.meta) {save(view);onBack();return;}
-    if(input==="/"&&!key.ctrl) {patch({searching:true,query:"",searchCursor:0,id:undefined,notes:false,top:0,left:0});return;}
+    if(input==="/"&&!key.ctrl) {patch({searching:true,query:"",searchCursor:0,id:undefined,notes:false,top:0,left:0,trail:undefined});return;}
     if(input.toLowerCase()==="g"&&!key.ctrl) {patch({...initialReferenceView(),type:view.type});return;}
     if(!reading) {
       if(input.toLowerCase()==="u"&&!key.ctrl) {patch({notes:true,top:0,left:0});return;}
@@ -236,6 +264,7 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
         patch({cursor:Math.max(0,Math.min(choices.length-1,cursor+(key.upArrow?-1:key.downArrow?1:key.pageUp?-height:height)))});
       return;
     }
+    if(input.toLowerCase()==="r"&&!key.ctrl&&related.length) {setRelatedCursor(0);return;}
     if(key.tab&&item?.variants?.length&&variant) {
       const index=item.variants.indexOf(variant);
       const next=item.variants[(index+item.variants.length+(key.shift?-1:1))%item.variants.length];
@@ -248,8 +277,11 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
   const menuHeight = Math.max(1,height-(view.searching?1:0));
   const menuTop = Math.max(0,Math.min(cursor,choices.length-1)-menuHeight+1);
   return <Box flexDirection="column" paddingX={1}>
-    <Text bold wrap="truncate-end">C 函数速查 · {version}{crumbs.length?" › "+crumbs.join(" › "):""}{item?" › "+item.title:view.notes?" › 使用约定":""}</Text>
-    {reading ? <>
+    <Text bold wrap="truncate-end">C 函数速查 · {version}{detailCrumbs.length?" › "+detailCrumbs.join(" › "):""}{item?" › "+item.title:view.notes?" › 使用约定":""}</Text>
+    {relatedCursor!==undefined ? <>
+      <Text bold>相关操作</Text>
+      {related.map((e,i)=><Text key={e.id} color={relatedCursor===i?"cyan":undefined}>{relatedCursor===i?"❯ ":"  "}{safeText(e.title)}</Text>)}
+    </> : reading ? <>
       {item?.variants?.length ? <Text wrap="truncate-end">{item.variants.map(v=><Text key={v.key} bold={v===variant} color={v===variant?"cyan":undefined}>{v===variant?"["+v.label+"]":v.label}  </Text>)}<Text dimColor>Tab 切换类型</Text></Text>:null}
       {body.slice(top,top+height).map((line,i)=><Text key={i} wrap="truncate-end">{line.length?line.map((span,j)=><Text key={j} bold={span.bold} color={span.color} dimColor={span.dim}>{span.text}</Text>):" "}</Text>)}
       <Text dimColor wrap="truncate-end">{status||("行 "+(body.length?top+1:0)+"–"+Math.min(top+height,body.length)+" / "+body.length)}</Text>
@@ -258,7 +290,7 @@ export function ReferenceManual({ reference, version, initial, save, onBack }: {
       {choices.slice(menuTop,menuTop+menuHeight).map((choice,i)=><Text key={i} wrap="truncate-end" color={i+menuTop===cursor?"cyan":undefined}>{i+menuTop===cursor?"❯ ":"  "}{safeText(choice.title)}{choice.summary?<Text dimColor> · {safeText(choice.summary)}</Text>:null}</Text>)}
       {!choices.length?<Text dimColor>{view.searching?"输入函数名或中文用途开始搜索":"没有条目"}</Text>:null}
     </>}
-    <Text dimColor wrap="truncate-end">{reading?"Esc 返回 · H 关闭 · G 首页 · / 搜索 · ↑↓ 翻页"+(example?" · C 复制":""):
+    <Text dimColor wrap="truncate-end">{relatedCursor!==undefined?"Esc 取消 · ↑↓ 选择 · Enter 打开":reading?"Esc 返回 · H 关闭 · / 搜索 · ↑↓ 翻页"+(example?" · C 复制":"")+(related.length?" · R 相关":""):
       view.searching?"Esc 取消 · ↑↓ 选择 · Enter 打开":"Esc 返回 · H 关闭 · G 首页 · / 搜索 · U 使用约定 · Enter 打开"}</Text>
   </Box>;
 }
