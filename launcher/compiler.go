@@ -61,7 +61,11 @@ func checkCompiler(directory, executable string, probe compilerProbe, managed bo
 		}
 		defer os.RemoveAll(temp)
 		env = append(env, "TEMP="+temp, "TMP="+temp)
-		args = append(args, "-fno-use-linker-plugin", "-B"+bin+string(filepath.Separator))
+		const target = "x86_64-w64-mingw32"
+		args = append(args, "-fno-use-linker-plugin",
+			"-B"+bin+string(filepath.Separator),
+			"-B"+filepath.Join(toolchain, "lib", "gcc", target, gccVersion)+string(filepath.Separator),
+			"-B"+filepath.Join(toolchain, target, "lib")+string(filepath.Separator))
 	}
 	cmd := exec.CommandContext(ctx, executable, append(args, probe.filename, "-o", "probe.exe")...)
 	cmd.Dir = directory

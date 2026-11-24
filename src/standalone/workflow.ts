@@ -47,7 +47,9 @@ export function toolchain(config: { c?: string; cpp?: string } = {}): Toolchain 
   const managedC = !c && process.env.ACCODING_MANAGED_CC;
   const managedCpp = !cpp && process.env.ACCODING_MANAGED_CXX;
   const portableFlags = (executable: string | false | undefined) => executable
-    ? ["-fno-use-linker-plugin", "-B" + path.dirname(executable) + path.sep] : [];
+    ? (process.env.ACCODING_MANAGED_GCC_PREFIXES ?? "").split(path.delimiter).filter(Boolean)
+      .flatMap(prefix => ["-B" + prefix + path.sep]).concat("-fno-use-linker-plugin")
+    : [];
   return {
     c: c || managedC ||
       (process.platform === "win32" ? "gcc" : "cc"),

@@ -284,8 +284,13 @@ func companion(root, installed string, args ...string) (*exec.Cmd, func(), error
 			cleanup = release
 			bin = managedCompilerBin(mapped)
 			cmd.Env = append(cmd.Env, compilerFlags(bin)...)
+			toolchain := filepath.Dir(bin)
+			const target = "x86_64-w64-mingw32"
+			prefixes := strings.Join([]string{bin, filepath.Join(toolchain, "lib", "gcc", target, gccVersion),
+				filepath.Join(toolchain, target, "lib")}, string(os.PathListSeparator))
 			cmd.Env = append(cmd.Env, "ACCODING_MANAGED_CC="+filepath.Join(bin, "gcc.exe"),
-				"ACCODING_MANAGED_CXX="+filepath.Join(bin, "g++.exe"), "TEMP="+temp, "TMP="+temp)
+				"ACCODING_MANAGED_CXX="+filepath.Join(bin, "g++.exe"),
+				"ACCODING_MANAGED_GCC_PREFIXES="+prefixes, "TEMP="+temp, "TMP="+temp)
 		}
 	}
 	return cmd, cleanup, nil
