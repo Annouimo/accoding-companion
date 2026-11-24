@@ -25,7 +25,7 @@ async function scenario(name, run, prepare, dimensions = "rows 16 cols 84") {
     CI: "false", TERM: "xterm-256color", NO_COLOR: "1",
     PATH: process.env.PATH };
   prepare?.(env);
-  const command = (prepare ? "stty " + dimensions + "; exec " : "") +
+  const command = (prepare ? 'tty > "$HOME/pty-device"; stty ' + dimensions + "; exec " : "") +
     JSON.stringify(process.execPath) + " " + JSON.stringify(bundle);
   const child = spawn("script", ["-q", "-e", "-c", command, "/dev/null"],
     { env, stdio: ["pipe", "pipe", "pipe"] });
@@ -52,7 +52,11 @@ async function scenario(name, run, prepare, dimensions = "rows 16 cols 84") {
     child.stdin.write(value);
   }
   try {
-    await run({ expect, send, home, alive: () => !finished });
+    await run({ expect, send, home, alive: () => !finished, resize: async (rows, cols) => {
+      const device = (await fs.readFile(path.join(home,"pty-device"),"utf8")).trim();
+      execFileSync("stty",["-F",device,"rows",String(rows),"cols",String(cols)]);
+      await delay(200);
+    } });
     const deadline = Date.now() + 9000;
     while (!finished && Date.now() < deadline) await delay(40);
     assert.ok(finished, name + ": process did not finish\n" + tail());
@@ -262,6 +266,7 @@ await scenario("reference stays navigable in a narrow short terminal", async ctx
   ctx.send("\x1b"); await ctx.expect("❯ A · 样例表格");
   ctx.send("\x1b"); await ctx.expect("❯ 独立题目");
   ctx.send("h"); await ctx.expect("分类目录"); await ctx.expect("❯ 输入与输出");
+  await ctx.resize(12,38);
   ctx.send("\r"); await ctx.expect("❯ 数字读写");
   ctx.send("\r"); await ctx.expect("❯ 读一个数");
   ctx.send("\r"); await ctx.expect("[int]"); await ctx.expect("函数接口");
@@ -270,7 +275,7 @@ await scenario("reference stays navigable in a narrow short terminal", async ctx
   assert.equal(await fs.readFile(path.join(ctx.home,"clipboard.txt"),"utf8"),"long long x = read_ll();");
   ctx.send("g"); await ctx.expect("分类目录"); await ctx.expect("❯ 输入与输出");
   ctx.send("h"); await ctx.expect("❯ 独立题目"); ctx.send("q");
-}, prepareReferenceCourse, "rows 12 cols 38");
+}, prepareReferenceCourse, "rows 20 cols 64");
 
 await scenario("password form stays open until cancelled", async ctx => {
   await ctx.expect("❯ 导入"); await delay(250); ctx.send("\x1b[B");
