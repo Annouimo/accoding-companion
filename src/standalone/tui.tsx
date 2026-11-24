@@ -9,7 +9,7 @@ import { activityAccepted, type ApplicationState } from "./state";
 import { type UpdateMode } from "./preset-manager";
 import { courseSettings, droppedPath } from "./workspaces";
 import { SampleOutput } from "./sample-output";
-import { Manual, parseReference } from "./manual";
+import { Manual, ReferenceManual, initialReferenceView, parseReference, type ReferenceView } from "./manual";
 import { LoginForm } from "./login-form";
 import { compilerErrorMessage } from "./compiler-guide";
 
@@ -75,7 +75,8 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   const [message, setMessage] = useState("");
   const [testResult, setTestResult] = useState<Record<string, SampleTestReport>>({});
   const [details, setDetails] = useState<SampleTestReport>();
-  const [manual, setManual] = useState<{ version: string; markdown: string; reference?: ReturnType<typeof parseReference> }>();
+  const [manual, setManual] = useState<{ version: string; markdown: string; reference?: ReturnType<typeof parseReference>; file?: string }>();
+  const manualViews = useRef(new Map<string, ReferenceView>());
   const [loginResume, setLoginResume] = useState<{ after?: () => void }>();
   const cursors = useRef(new Map<string, number>());
   const active = useRef(true);
@@ -388,7 +389,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       const content = await fs.readFile(file, "utf8");
       const version = path.basename(path.dirname(file));
       if (path.basename(file) === "reference.json")
-        setManual({ version, markdown: "", reference: parseReference(content) });
+        setManual({ version, markdown: "", reference: parseReference(content), file });
       else setManual({ version, markdown: content });
     });
   }
@@ -469,7 +470,10 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       panel.toggle?.(list[selected].id);
   }, { isActive: !details && !manual && !loginResume });
 
-  if (manual) return <Manual {...manual} onBack={() => setManual(undefined)} />;
+  if (manual?.reference && manual.file) return <ReferenceManual reference={manual.reference} version={manual.version}
+    initial={manualViews.current.get(manual.file) ?? initialReferenceView()}
+    save={view => manualViews.current.set(manual.file!,view)} onBack={() => setManual(undefined)} />;
+  if (manual) return <Manual version={manual.version} markdown={manual.markdown} onBack={() => setManual(undefined)} />;
   if (loginResume) return <LoginForm canRemember={app.credentialBackend.persistent}
     cancel={() => setLoginResume(undefined)} submit={async (username, password, remember) => {
       const loginResult = await run("登录中…", async () => {
