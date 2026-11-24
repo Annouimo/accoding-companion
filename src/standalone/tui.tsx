@@ -11,6 +11,7 @@ import { courseSettings, droppedPath } from "./workspaces";
 import { SampleOutput } from "./sample-output";
 import { Manual, parseReference } from "./manual";
 import { LoginForm } from "./login-form";
+import { compilerErrorMessage } from "./compiler-guide";
 
 type Page = { group?: string; problem?: string };
 interface Row {
@@ -181,7 +182,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       await reload();
       return { result, output: output.join("\n") };
     } catch (error) {
-      collect(error instanceof Error ? error.message : String(error));
+      collect(await compilerErrorMessage(error));
       setMessage(output.slice(-3).join("\n"));
       return { output: output.join("\n") };
     } finally {

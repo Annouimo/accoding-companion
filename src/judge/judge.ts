@@ -29,6 +29,12 @@ function visible(text: string) {
     "〈末尾〉"
   );
 }
+export class CompilerUnavailableError extends Error {
+  constructor(language: string, compiler: string, cause: unknown) {
+    super(`未找到 ${language} 编译器（${compiler}）。请安装编译器，或在设置中指定已有编译器。`, { cause });
+    this.name = "CompilerUnavailableError";
+  }
+}
 export interface Toolchain {
   c: string;
   cpp: string;
@@ -122,7 +128,7 @@ export async function compile(
     await fs.rm(directory, { recursive: true, force: true });
     if (error instanceof Error && (error.cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT" &&
         await fs.stat(cwd).then(info => info.isDirectory(), () => false)) {
-      throw new Error(`未找到 ${isC ? "C" : "C++"} 编译器（${configuredCompiler}）。请安装编译器，或在设置中指定已有编译器。具体方法见《使用说明》。`, { cause: error });
+      throw new CompilerUnavailableError(isC ? "C" : "C++", configuredCompiler, error);
     }
     throw error;
   }

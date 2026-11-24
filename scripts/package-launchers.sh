@@ -27,6 +27,8 @@ for os in windows darwin; do
     bundle="$stage/$os-$arch"
     mkdir -p "$bundle/images"
     sed "s/@VERSION@/$version/g" "$repo/docs/launcher/使用说明.html" > "$bundle/使用说明.html"
+    cp "$repo/docs/launcher/编译环境配置.html" "$bundle/编译环境配置.html"
+    test -s "$bundle/编译环境配置.html"
     cp "$repo/docs/launcher/images/contest-list.png" "$bundle/images/"
     test -s "$bundle/images/contest-list.png"
     test -s "$bundle/使用说明.html"

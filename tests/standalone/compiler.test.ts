@@ -11,8 +11,8 @@ test("missing compiler is reported only when compilation is requested", async ()
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-compiler-"));
   try {
     const config = { ...toolchain(), c: path.join(root, "nonexistent-gcc"), cpp: path.join(root, "nonexistent-g++") };
-    await assert.rejects(compile(path.join(root, "main.c"), "int main(void) {return 0;}", config), /未找到 C 编译器.*使用说明/);
-    await assert.rejects(compile(path.join(root, "main.cpp"), "int main() {return 0;}", config), /未找到 C\+\+ 编译器.*使用说明/);
+    await assert.rejects(compile(path.join(root, "main.c"), "int main(void) {return 0;}", config), /未找到 C 编译器.*请安装编译器/);
+    await assert.rejects(compile(path.join(root, "main.cpp"), "int main() {return 0;}", config), /未找到 C\+\+ 编译器.*请安装编译器/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

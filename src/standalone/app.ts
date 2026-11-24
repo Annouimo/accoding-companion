@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { StandaloneWorkflow, type ResolvedProblem } from "./workflow";
 import { ask, confirm, interactive, select } from "./terminal";
 import { activityAccepted } from "./state";
+import { compilerErrorMessage } from "./compiler-guide";
 
 function option(args: string[], name: string): string | undefined {
   const at = args.indexOf(name);
@@ -255,7 +256,7 @@ async function tui(app: StandaloneWorkflow): Promise<void> {
       else if (extra === "logout") await app.logout();
     }
     } catch (error) {
-      console.error("操作失败：" + (error instanceof Error ? error.message : String(error)));
+      console.error("操作失败：" + await compilerErrorMessage(error));
     }
   }
 }
@@ -364,7 +365,7 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((error: unknown) => {
-  console.error("错误：" + (error instanceof Error ? error.message : String(error)));
+run().catch(async (error: unknown) => {
+  console.error("错误：" + await compilerErrorMessage(error));
   process.exitCode = 1;
 });
