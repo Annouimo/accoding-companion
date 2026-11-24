@@ -202,6 +202,8 @@ await scenario("missing compiler opens the local HTML guide only after a test re
 
 await scenario("structured manual supports variant search, copy and resume", async ctx => {
   await ctx.expect("❯ 运行样例");
+  ctx.send("\x1b"); await ctx.expect("❯ A · 样例表格");
+  ctx.send("\x1b"); await ctx.expect("❯ 独立题目");
   ctx.send("h"); await ctx.expect("❯ 输入与输出");
   ctx.send("\r"); await ctx.expect("❯ 数字读写");
   ctx.send("\r"); await ctx.expect("❯ 读一个数");
@@ -209,12 +211,12 @@ await scenario("structured manual supports variant search, copy and resume", asy
   ctx.send("\t"); await ctx.expect("[long long]"); await ctx.expect("long long x = read_ll();");
   ctx.send("c"); await ctx.expect("已复制完整示例");
   assert.equal(await fs.readFile(path.join(ctx.home,"clipboard.txt"),"utf8"),"long long x = read_ll();");
-  ctx.send("h"); await ctx.expect("❯ 运行样例");
+  ctx.send("h"); await ctx.expect("❯ 独立题目");
   ctx.send("h"); await ctx.expect("[long long]"); await ctx.expect("long long x = read_ll();");
   ctx.send("/"); await ctx.expect("搜索：");
   ctx.send("read_double"); await ctx.expect("读一个数"); ctx.send("\r");
   await ctx.expect("[double]"); await ctx.expect("double x = read_double();");
-  ctx.send("h"); await ctx.expect("❯ 运行样例"); ctx.send("q");
+  ctx.send("h"); await ctx.expect("❯ 独立题目"); ctx.send("q");
 }, env => {
   prepareSampleCourse(env);
   const reference={schemaVersion:1,notes:"下标从零开始。",categories:[{title:"输入和输出",entries:[{
