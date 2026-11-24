@@ -201,3 +201,37 @@ test("standalone C and C++ judge share the same persisted official samples", asy
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("managed GCC uses explicit runtime library paths without changing user compilers", () => {
+  const keys = ["ACCODING_CC", "CC", "ACCODING_CXX", "CXX",
+    "ACCODING_MANAGED_CC", "ACCODING_MANAGED_CXX", "ACCODING_MANAGED_GCC_PREFIXES"];
+  const previous = keys.map(key => process.env[key]);
+  try {
+    for (const key of keys) delete process.env[key];
+    process.env.ACCODING_MANAGED_CC = "managed-gcc";
+    process.env.ACCODING_MANAGED_CXX = "managed-g++";
+    const dirs = ["portable toolchain/bin", "portable toolchain/lib"];
+    process.env.ACCODING_MANAGED_GCC_PREFIXES = dirs.join(path.delimiter);
+    const managed = toolchain();
+    assert.equal(managed.c, "managed-gcc");
+    assert.equal(managed.cpp, "managed-g++");
+    for (const args of [managed.cArgs, managed.cppArgs]) {
+      for (const directory of dirs) {
+        assert.ok(args.includes("-B" + directory + "/"));
+        assert.ok(args.includes("-L" + directory));
+      }
+    }
+    const custom = toolchain({ c: "custom-gcc", cpp: "custom-g++" });
+    assert.equal(custom.c, "custom-gcc");
+    assert.equal(custom.cpp, "custom-g++");
+    for (const args of [custom.cArgs, custom.cppArgs]) {
+      assert.ok(!args.some(arg => arg.startsWith("-B") || arg.startsWith("-L")));
+    }
+  } finally {
+    keys.forEach((key, index) => {
+      const value = previous[index];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    });
+  }
+});
