@@ -1,135 +1,19 @@
 name: Publish npm stable release
 
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: "DRY_RUN builds only; PUBLISH_LATEST publishes the CLI; PUBLISH_LAUNCHERS publishes the ZIPs"
-        type: choice
-        required: true
-        default: DRY_RUN
-        options:
-          - DRY_RUN
-          - PUBLISH_LATEST
-          - PUBLISH_LAUNCHERS
-      expected_version:
-        description: "Must exactly match the checked-out stable package.json"
-        type: string
-        required: true
-
-      expected_preset_version:
-        description: "Published C Exam Kit version required for a launcher release"
-        type: string
-        required: false
-        default: ""
+  push:
+    branches: [publish/launcher-0.2.4-windows]
 
 permissions:
   contents: read
 
 concurrency:
-  group: npm-latest-publish
+  group: launcher-release-0.2.4
   cancel-in-progress: false
 
 jobs:
-  pack:
-    name: Build and validate Accoding Companion CLI
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-      - name: Verify the intended source branch and stable version
-        env:
-          EXPECTED_VERSION: ${{ inputs.expected_version }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/main"
-          node - <<'NODE'
-          const fs=require("node:fs");
-          const file="package.json";
-          const pkg=JSON.parse(fs.readFileSync(file,"utf8"));
-          if(pkg.name!=="@annouimo/accoding-companion") throw Error("Unexpected package name");
-          if(pkg.repository?.url!=="git+https://github.com/Annouimo/accoding-companion.git") throw Error("GitHub provenance repository mismatch");
-          if(pkg.version!==process.env.EXPECTED_VERSION || !/^\d+\.\d+\.\d+$/.test(pkg.version)) throw Error("Expected version mismatch or not a stable version");
-          delete pkg.private; // Only the runner copy becomes publishable.
-          fs.writeFileSync(file,JSON.stringify(pkg,null,2)+"\n");
-          NODE
-      - name: Build, test, and pack
-        run: |
-          set -euo pipefail
-          npm install --no-audit --no-fund
-          npm run typecheck
-          npm test
-          npm run build
-          node tests/standalone/pty-smoke.mjs dist/accoding.mjs
-          mkdir -p "$RUNNER_TEMP/npm-dist"
-          npm pack --pack-destination "$RUNNER_TEMP/npm-dist"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: npm-release-tarball
-          path: ${{ runner.temp }}/npm-dist/*.tgz
-          if-no-files-found: error
-          retention-days: 7
-
-  launcher:
-    name: Verify launcher (${{ matrix.os }})
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - run: npm run test:launcher
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: launcher/go.mod
-          cache-dependency-path: launcher/go.sum
-      - name: Verify Go launcher and managed toolchains
-        working-directory: launcher
-        env:
-          ACCODING_TEST_NODE_DOWNLOAD: "1"
-          ACCODING_TEST_GCC_DOWNLOAD: "1"
-        run: go test -v ./...
-
-  publish:
-    name: Publish Accoding Companion CLI to npm latest
-    needs: [pack, launcher, launcher-bundles]
-    if: ${{ inputs.mode == 'PUBLISH_LATEST' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-      - name: Ensure OIDC compatible npm CLI
-        run: npm install --global "npm@^11.21.0"
-      - uses: actions/download-artifact@v4
-        with:
-          name: npm-release-tarball
-          path: ./release
-      - name: Publish stable package with npm OIDC
-        run: |
-          set -euo pipefail
-          tarball="$(find release -type f -name '*.tgz' -print -quit)"
-          test -n "$tarball"
-          # npm must receive an explicit filesystem path, not a package/Git spec.
-          npm publish "$(realpath "$tarball")" --tag latest --access public
-
   launcher-bundles:
+    if: ${{ github.event.head_commit.message == 'Release launchers 0.2.4 after Windows fix' }}
     name: Package native launchers and offline guide
     runs-on: ubuntu-latest
     permissions:
@@ -155,8 +39,7 @@ jobs:
 
   launcher-release:
     name: Publish double-click launcher ZIPs
-    needs: [pack, launcher, launcher-bundles]
-    if: ${{ inputs.mode == 'PUBLISH_LAUNCHERS' }}
+    needs: launcher-bundles
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -169,13 +52,18 @@ jobs:
           node-version: "24"
       - name: Verify both npm packages before publishing launchers
         env:
-          EXPECTED_CLI: ${{ inputs.expected_version }}
-          EXPECTED_PRESET: ${{ inputs.expected_preset_version }}
+          EXPECTED_CLI: 0.2.4
+          EXPECTED_PRESET: 0.6.7
         run: |
           set -euo pipefail
-          test "$(npm view @annouimo/accoding-companion@latest version)" = "$EXPECTED_CLI"
-          test -n "$EXPECTED_PRESET"
-          test "$(npm view @annouimo/c-exam-kit-preset@latest version)" = "$EXPECTED_PRESET"
+          for attempt in $(seq 1 52); do
+            companion="$(npm view @annouimo/accoding-companion@latest version --prefer-online --fetch-retries=0 --fetch-timeout=10000 2>/dev/null || true)"
+            preset="$(npm view @annouimo/c-exam-kit-preset@latest version --prefer-online --fetch-retries=0 --fetch-timeout=10000 2>/dev/null || true)"
+            if test "$companion" = "$EXPECTED_CLI" && test "$preset" = "$EXPECTED_PRESET"; then exit 0; fi
+            sleep 15
+          done
+          echo 'The expected Companion and C Exam Kit versions did not arrive on npm latest'
+          exit 1
       - uses: actions/download-artifact@v4
         with:
           name: native-launchers
@@ -187,5 +75,5 @@ jobs:
           set -euo pipefail
           version="$(node -p 'require("./package.json").version')"
           gh release create "v$version" launcher-dist/*.zip \
-            --target "$GITHUB_SHA" --title "Accoding Companion $version" \
+            --target "e3df49318594bd2ce3088186406704198416f36d" --title "Accoding Companion $version" \
             --notes "Download the ZIP for your operating system and architecture and extract all files. Open Accoding Launcher.exe on Windows or Accoding Launcher.command on macOS. The package includes an offline HTML guide."
