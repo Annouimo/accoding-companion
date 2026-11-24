@@ -1,0 +1,51 @@
+name: Verify native launcher changes
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'launcher/**'
+      - 'src/judge/**'
+      - 'src/standalone/workflow.ts'
+      - 'tests/standalone/**'
+      - '.github/workflows/verify-native-launcher.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: node tests/standalone/pty-smoke.mjs dist/accoding.mjs
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: launcher/go.mod
+          cache-dependency-path: launcher/go.sum
+      - run: npm run test:launcher
+      - name: Verify real downloaded GCC and Node.js under Unicode paths
+        working-directory: launcher
+        env:
+          ACCODING_TEST_NODE_DOWNLOAD: "1"
+          ACCODING_TEST_GCC_DOWNLOAD: "1"
+        run: go test -v ./...
