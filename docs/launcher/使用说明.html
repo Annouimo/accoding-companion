@@ -83,7 +83,7 @@ Annouimo · https://github.com/Annouimo/accoding-companion
     <h4>Windows：安装 GCC（或使用已有 Dev-C++）</h4>
     <p>没有编译器时，可以在 PowerShell 中通过 WinGet 安装 WinLibs（适用于 x64 Windows；其他架构请使用兼容的编译器）。</p>
     <pre>winget install --id BrechtSanders.WinLibs.POSIX.UCRT -e</pre>
-    <p>安装后关闭并重新打开终端及启动器，用下面的命令检查版本。如果找不到命令，检查用户 PATH 是否包含编译器的 bin 目录。备用方案是 <a href="https://www.msys2.org/">MSYS2</a>。</p>
+    <p>安装后关闭并重新打开终端及启动器，用下面的命令检查版本。如果找不到命令，检查用户 PATH 是否包含编译器的 bin 目录。若 WinGet 不可用，可以安装 <a href="https://www.msys2.org/">MSYS2</a>，在 MSYS2 UCRT64 终端执行 <code>pacman -S --needed mingw-w64-ucrt-x86_64-gcc</code>，再将 <code>C:\msys64\ucrt64\bin</code>（以实际安装目录为准）添加到用户 Path。</p>
     <pre>gcc --version
 g++ --version</pre>
     <p>已有 Dev-C++ 时无需重复安装：打开 Dev-C++ 的编译器设置，找到编译器所在的 bin 文件夹。例如 <code>TDM-GCC-64\bin</code> 或 <code>MinGW64\bin</code>。在 Windows 搜索「编辑账户的环境变量」，编辑用户 Path，新增这个完整目录；不要覆盖原有条目。重新打开启动器。也可以在 Companion 的「设置 → 设置 C / C++ 编译器」中分别填写 gcc.exe、g++.exe 的完整路径，输入 auto 恢复系统默认。</p>

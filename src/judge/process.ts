@@ -16,6 +16,7 @@ export function runProcess(
     timeoutMs: number;
     outputLimit: number;
     signal?: AbortSignal;
+    env?: NodeJS.ProcessEnv;
   },
 ): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
@@ -37,6 +38,7 @@ export function runProcess(
     let settled = false;
     const child = spawn(command, args, {
       cwd: options.cwd,
+      env: options.env,
       shell: false,
       detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],

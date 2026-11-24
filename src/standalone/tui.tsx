@@ -318,12 +318,12 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   function settings() {
     open({ title: "课程设置", rows: [
       { id: "workspace", label: "切换或新建课程", run: chooseWorkspace },
-      { id: "compiler", label: "设置 C / C++ 编译器", run: configureCompiler },
       ...(root ? [{ id: "preset", label: "更新课程资源", run: presets }] : []),
       { id: "login", label: app.session.user ? "切换账号" : "登录 Accoding", run: login },
       ...(app.session.user ? [{ id: "logout", label: "退出登录", run: async () => {
         await run("正在退出登录…", () => app.logout());
-      } }] : [])
+      } }] : []),
+      { id: "compiler", label: "设置 C / C++ 编译器", run: configureCompiler }
     ] });
   }
 
