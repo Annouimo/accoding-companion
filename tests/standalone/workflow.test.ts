@@ -100,8 +100,10 @@ test("standalone C and C++ judge share the same persisted official samples", asy
     await fs.mkdir(config, { recursive: true });
     const preset = builtinPreset();
     await fs.mkdir(path.join(config, "components"));
-    for (const entry of preset.manifest.components)
+    for (const entry of preset.manifest.components) {
+      assert.ok(entry.source);
       await fs.writeFile(path.join(config, entry.source), preset.code.get(entry.id)!);
+    }
     await fs.writeFile(path.join(config, "manifest.json"),
       JSON.stringify(preset.manifest));
     const expandedHeader = path.join(config, "expanded.h");

@@ -41,7 +41,7 @@ for os in windows darwin; do
       cp "$repo/launcher/macos.command" "$bundle/Accoding Launcher.command"
       chmod +x "$bundle/Accoding Launcher.command"
     fi
-    (cd "$repo/launcher" && CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -buildvcs=false -trimpath -o "$binary" .)
+    (cd "$repo/launcher" && CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags "-X main.launcherVersion=$version" -buildvcs=false -trimpath -o "$binary" .)
     (cd "$bundle" && zip -qr "$out/accoding-launcher-$version-$os-$arch.zip" .)
   done
 done

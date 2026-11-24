@@ -91,7 +91,7 @@ await scenario("nested course setup saves a C99 workspace", async ctx => {
   const settings = JSON.parse(await fs.readFile(path.join(directory, ".accoding", "workspace.json"), "utf8"));
   assert.equal(settings.language, "c");
   assert.equal(await fs.readFile(existingCode, "utf8"), "int main(void) { return 0; }\n");
-  await ctx.expect("H 手册");
+  await ctx.expect("H 函数速查");
   settings.presetVersion = "0.6.6";
   await fs.writeFile(path.join(directory, ".accoding", "workspace.json"), JSON.stringify(settings));
   const snapshot = path.join(directory, ".accoding", "presets", settings.presetVersion);
@@ -101,11 +101,25 @@ await scenario("nested course setup saves a C99 workspace", async ctx => {
     "读取数组。\n\n" + String.fromCharCode(96).repeat(3) + "c\n" +
     "int count = 2; // 示例\n" + String.fromCharCode(96).repeat(3) + "\n");
   ctx.send("h");
-  await ctx.expect("C99 函数速查 · 0.6.6");
+  await ctx.expect("C 函数速查 · 0.6.6");
   await ctx.expect("❯ 数组"); await delay(150); ctx.send("\r");
   await ctx.expect("int count = 2; // 示例");
   await delay(150); ctx.send("\x1b"); await ctx.expect("❯ 数组");
-  await delay(150); ctx.send("\x1b"); await ctx.expect("H 手册");
+  await delay(150); ctx.send("\x1b"); await ctx.expect("H 函数速查");
+  await fs.unlink(manual);
+  await fs.writeFile(path.join(snapshot, "reference.json"), JSON.stringify({
+    schemaVersion: 1, categories: [{title: "输入和输出", entries: [
+      {id: "read_int", title: "读一个数", signatures: ["int read_int(void);", "long long read_ll(void);",
+        "double read_double(void);"], description: "从标准输入读取一个数。", example: "int n = read_int();"}
+    ]}]
+  }));
+  ctx.send("h"); await ctx.expect("❯ 输入和输出");
+  await delay(150); ctx.send("\r"); await ctx.expect("❯ 读一个数");
+  await delay(150); ctx.send("\r"); await ctx.expect("double read_double(void);");
+  await ctx.expect("int n = read_int();");
+  await delay(150); ctx.send("\x1b"); await ctx.expect("❯ 读一个数");
+  await delay(150); ctx.send("\x1b"); await ctx.expect("❯ 输入和输出");
+  await delay(150); ctx.send("\x1b"); await ctx.expect("H 函数速查");
   ctx.send("q");
 });
 

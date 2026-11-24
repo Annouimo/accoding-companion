@@ -1,3 +1,4 @@
+import { languageChoices, languages } from "../workspace/sources";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -109,7 +110,8 @@ export async function readableProblemDirectory(
 export interface CourseSettings {
   schemaVersion: 1;
   kind: "course";
-  language: "c" | "cpp";
+  language: keyof typeof languages;
+  languageId?: string;
   presetVersion?: string;
   independentDirectory?: string;
 }
@@ -126,8 +128,10 @@ export async function courseSettings(root: string, requested?: "c" | "cpp"): Pro
       throw new Error("课程工作区配置格式未知；原文件已保留。");
     }
     const saved = config as CourseSettings;
+    if (saved.languageId && saved.languageId !== languages[saved.language].id)
+      throw new Error("课程语言配置与源码类型不一致。");
     if (requested && saved.language !== requested)
-      throw new Error("本工作区固定使用 " + saved.language +
+      throw new Error("本工作区固定使用 " + languages[saved.language].label +
         "；请建立或切换另一个工作区，而不是更改已有源码语言。");
     return saved;
   } catch (error) {
@@ -138,15 +142,13 @@ export async function courseSettings(root: string, requested?: "c" | "cpp"): Pro
     throw new Error("检测到旧版工作区，请先迁移：" + root);
   let language = requested;
   if (!language && interactive()) {
-    const picked = await select("首次配置课程工作区：选择固定编程语言", [
-      { label: "C99", value: "c" }, { label: "C++17", value: "cpp" }
-    ]);
+    const picked = await select("首次配置课程工作区：选择固定编程语言", languageChoices);
     if (!picked) throw new Error("取消初始化工作区。");
     language = picked as "c" | "cpp";
   }
   if (!language)
     throw new Error("首次以非交互方式初始化工作区，请指定 --workspace-lang c 或 cpp。");
-  const config: CourseSettings = { schemaVersion: 1, kind: "course", language };
+  const config: CourseSettings = { schemaVersion: 1, kind: "course", language, languageId: languages[language].id };
   await fs.mkdir(path.dirname(file), { recursive: true });
   try {
     await fs.writeFile(file, JSON.stringify(config, null, 2) + "\n",

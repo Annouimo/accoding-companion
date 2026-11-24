@@ -1,3 +1,4 @@
+import { languageChoices } from "../workspace/sources";
 import React, { useEffect, useRef, useState } from "react";
 import { Box, Text, render, useApp, useInput, useWindowSize } from "ink";
 import fs from "node:fs/promises";
@@ -8,7 +9,7 @@ import { activityAccepted, type ApplicationState } from "./state";
 import { type UpdateMode } from "./preset-manager";
 import { courseSettings, droppedPath } from "./workspaces";
 import { SampleOutput } from "./sample-output";
-import { Manual } from "./manual";
+import { Manual, parseReference } from "./manual";
 import { LoginForm } from "./login-form";
 
 type Page = { group?: string; problem?: string };
@@ -73,7 +74,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   const [message, setMessage] = useState("");
   const [testResult, setTestResult] = useState<Record<string, SampleTestReport>>({});
   const [details, setDetails] = useState<SampleTestReport>();
-  const [manual, setManual] = useState<{ version: string; markdown: string }>();
+  const [manual, setManual] = useState<{ version: string; markdown: string; reference?: ReturnType<typeof parseReference> }>();
   const [loginResume, setLoginResume] = useState<{ after?: () => void }>();
   const cursors = useRef(new Map<string, number>());
   const active = useRef(true);
@@ -223,8 +224,8 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     const exists = await fs.stat(path.join(droppedPath(directory), ".accoding", "workspace.json"))
       .then(() => true, () => false);
     if (exists) return;
-    const language = await pick("选择课程的编程语言", ["C99", "C++17"]);
-    return language === "C99" ? "c" : language === "C++17" ? "cpp" : "cancel";
+    const language = await pick("选择课程的编程语言", languageChoices.map(choice => choice.label));
+    return languageChoices.find(choice => choice.label === language)?.value ?? "cancel";
   }
 
   function importPrompt(kind: "contest" | "problem") {
@@ -273,7 +274,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   async function presets() {
     if (!root) return;
     await run("正在读取本机脚手架…", async () => {
-      if ((await courseSettings(root)).language !== "c") throw Error("此课程使用 C++17。");
+      if ((await courseSettings(root)).language !== "c") throw Error("此课程使用 C++。");
       const versions = await app.installedPresetVersions();
       if (!versions.length) throw Error("尚未安装 C Exam Kit。请先运行启动器。");
       const version = versions.length === 1 ? versions[0].version :
@@ -293,8 +294,9 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
         return;
       }
       const summary = (mode === "empty" ? "新题使用 " + version + " · " : "") +
-        "更新 " + preview.targets.length + " 题 · 保留 " + preview.retained + " 题";
-      if (await pick(summary, ["取消", "确认更新"]) !== "确认更新") return;
+        "更新 " + preview.targets.length + " 题 · 保留 " + preview.retained + " 题" +
+        (preview.retained ? "（已改动 " + preview.edited + " · 无法确认 " + preview.unknown + "）" : "");
+      if (await pick(summary, ["确认更新", "取消"]) !== "确认更新") return;
       const result = await app.updateQuestionPresets(version, mode, selected, root, mode === "empty");
       setTestResult({});
       console.log("更新 " + result.updated + " 道题");
@@ -368,10 +370,13 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
 
   function showManual() {
     void run("正在打开手册…", async () => {
-      if (!root) throw new Error("请先配置 C99 课程工作区。");
+      if (!root) throw new Error("请先配置 C 课程工作区。");
       const file = await app.presetManualPath(root, problem);
-      const markdown = await fs.readFile(file, "utf8");
-      setManual({ version: path.basename(path.dirname(file)), markdown });
+      const content = await fs.readFile(file, "utf8");
+      const version = path.basename(path.dirname(file));
+      if (path.basename(file) === "reference.json")
+        setManual({ version, markdown: "", reference: parseReference(content) });
+      else setManual({ version, markdown: content });
     });
   }
   const entries: Row[] = problem ? [
@@ -491,7 +496,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       {!busy && list.length > visibleCount ? <Text dimColor>{selected + 1}/{list.length}</Text> : null}
       <Text dimColor>{panel && "input" in panel ? "Enter 确定 · Esc 取消" :
         panel ? "↑ ↓ 选择 · Enter 确定 · Esc 返回" :
-        "↑ ↓ 选择 · Enter 打开 · " + (group ? "Esc 返回 · " : "") + "H 手册 · Q 退出"}</Text>
+        "↑ ↓ 选择 · Enter 打开 · " + (group ? "Esc 返回 · " : "") + "H 函数速查 · Q 退出"}</Text>
     </Box>
   );
 }

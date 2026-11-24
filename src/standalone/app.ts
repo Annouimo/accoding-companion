@@ -323,7 +323,8 @@ async function run(): Promise<void> {
       if (args.includes("--preview")) {
         const preview = await app.previewPresetUpdate(args[2], "empty", [], root);
         console.log(JSON.stringify({ root: preview.root, version: args[2],
-          eligible: preview.targets.length, retained: preview.retained }));
+          eligible: preview.targets.length, retained: preview.retained,
+          edited: preview.edited, unknown: preview.unknown }));
         return;
       }
       const result = await app.updateQuestionPresets(args[2], "empty", [], root, true);

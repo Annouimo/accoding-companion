@@ -1,3 +1,4 @@
+import { languages } from "../workspace/sources";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -5,12 +6,14 @@ export interface ComponentSpec {
   id: string;
   description?: string;
   symbols: string[];
-  source: string;
+  source?: string;
+  code?: string;
   requires: string[];
 }
 
 export interface PresetManifest {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
+  languageId?: string;
   id: string;
   language: "c";
   standard: "c99";
@@ -24,7 +27,10 @@ export interface LoadedPreset {
   code: Map<string, string>;
   order: string[];
   manual?: string;
+  reference?: string;
 }
+
+export const PRESET_REFERENCE = "reference.json";
 
 export const PRESET_MANUAL = "manual.zh-CN.md";
 
@@ -50,11 +56,13 @@ export async function loadPreset(manifestPath: string): Promise<LoadedPreset> {
   const raw: unknown = JSON.parse(await fs.readFile(absolute, "utf8"));
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("invalid JSON object");
   const data = raw as Record<string, unknown>;
-  if (data.schemaVersion !== 1) fail("unsupported schemaVersion");
+  if (data.schemaVersion !== 1 && data.schemaVersion !== 2) fail("unsupported schemaVersion");
   if (typeof data.id !== "string" || !IDENTIFIER.test(data.id.replace(/-/g, "_")))
     fail("invalid preset id");
   if (data.language !== "c" || data.standard !== "c99")
-    fail("only C99 presets are supported in v1");
+    fail("only C presets are implemented by this assembler");
+  if (data.schemaVersion === 2 && data.languageId !== languages.c.id)
+    fail("invalid languageId for C preset");
   if (typeof data.headerFile !== "string" || !HEADER.test(data.headerFile))
     fail("headerFile must be a local .h filename");
   const systemHeaders = stringArray(data.systemHeaders, "systemHeaders");
@@ -84,19 +92,28 @@ export async function loadPreset(manifestPath: string): Promise<LoadedPreset> {
     }
     if (!requires.every((name) => IDENTIFIER.test(name)))
       fail("invalid dependencies for " + id);
-    if (typeof item.source !== "string" || !item.source.endsWith(".h"))
-      fail("source must be a relative .h path for " + id);
-    const candidate = path.resolve(base, item.source);
-    const relative = path.relative(base, candidate);
-    if (!relative || relative === ".." || relative.startsWith(".." + path.sep) ||
-        path.isAbsolute(relative))
-      fail("source escapes preset directory: " + item.source);
-    const resolved = await fs.realpath(candidate);
-    const safe = path.relative(base, resolved);
-    if (!safe || safe === ".." || safe.startsWith(".." + path.sep) ||
-        path.isAbsolute(safe))
-      fail("source resolves outside preset directory: " + item.source);
-    const body = await fs.readFile(resolved, "utf8");
+    let body: string;
+    let location: Pick<ComponentSpec, "code" | "source">;
+    if (data.schemaVersion === 2) {
+      if (typeof item.code !== "string" || !item.code.trim()) fail("missing inline code for " + id);
+      body = item.code;
+      location = { code: body };
+    } else {
+      if (typeof item.source !== "string" || !item.source.endsWith(".h"))
+        fail("source must be a relative .h path for " + id);
+      const candidate = path.resolve(base, item.source);
+      const relative = path.relative(base, candidate);
+      if (!relative || relative === ".." || relative.startsWith(".." + path.sep) ||
+          path.isAbsolute(relative))
+        fail("source escapes preset directory: " + item.source);
+      const resolved = await fs.realpath(candidate);
+      const safe = path.relative(base, resolved);
+      if (!safe || safe === ".." || safe.startsWith(".." + path.sep) ||
+          path.isAbsolute(safe))
+        fail("source resolves outside preset directory: " + item.source);
+      body = await fs.readFile(resolved, "utf8");
+      location = { source: item.source };
+    }
     if (/^\s*#\s*include\b/m.test(body))
       fail(id + " must declare systemHeaders in the manifest, not #include");
     code.set(id, body.endsWith("\n") ? body : body + "\n");
@@ -105,7 +122,7 @@ export async function loadPreset(manifestPath: string): Promise<LoadedPreset> {
       description: typeof item.description === "string" ? item.description : undefined,
       symbols,
       requires,
-      source: item.source
+      ...location
     });
   }
 
@@ -122,16 +139,20 @@ export async function loadPreset(manifestPath: string): Promise<LoadedPreset> {
     order.push(id);
   }
   for (const item of components) visit(item.id);
-  const manualPath = path.join(base, PRESET_MANUAL);
-  const manual = await fs.lstat(manualPath)
-    .then(stat => stat.isFile() ? fs.readFile(manualPath, "utf8") : undefined)
-    .catch(error => {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return undefined;
-    });
+  function readOptional(file: string) {
+    const artifact = path.join(base, file);
+    return fs.lstat(artifact)
+      .then(stat => stat.isFile() ? fs.readFile(artifact, "utf8") : undefined)
+      .catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        return undefined;
+      });
+  }
+  const [manual, reference] = await Promise.all([readOptional(PRESET_MANUAL), readOptional(PRESET_REFERENCE)]);
   return {
     manifest: {
-      schemaVersion: 1,
+      schemaVersion: data.schemaVersion,
+      ...(data.schemaVersion === 2 ? { languageId: languages.c.id } : {}),
       id: data.id as string,
       language: "c",
       standard: "c99",
@@ -141,7 +162,8 @@ export async function loadPreset(manifestPath: string): Promise<LoadedPreset> {
     },
     code,
     order,
-    manual
+    manual,
+    reference
   };
 }
 
@@ -164,15 +186,36 @@ export function renderHeader(preset: LoadedPreset): string {
 }
 
 /** Replace comments (and optionally literals) with spaces, preserving newlines. */
-function maskC(source: string, literals: boolean): string {
+function maskC(source: string, literals: boolean, compact = false, cpp = false): string {
   let out = "";
+  const number = /(?:[0-9]|\.[0-9])(?:[eEpP][+-]|[A-Za-z0-9_.]|'[A-Za-z0-9_])*/y;
+  const rawStart = /(?:u8|u|U|L)?R"([^ ()\\\t\r\n]{0,16})\(/y;
   let state: "code" | "line" | "block" | "single" | "double" = "code";
   for (let i = 0; i < source.length; i++) {
     const ch = source[i];
     const next = source[i + 1];
     if (state === "code") {
-      if (ch === "/" && next === "/") { state = "line"; out += "  "; i++; continue; }
-      if (ch === "/" && next === "*") { state = "block"; out += "  "; i++; continue; }
+      if (cpp && !/[A-Za-z_0-9]/.test(source[i - 1] ?? "")) {
+        number.lastIndex = i;
+        rawStart.lastIndex = i;
+        const token = number.exec(source);
+        if (token) {
+          out += token[0];
+          i = number.lastIndex - 1;
+          continue;
+        }
+        const raw = rawStart.exec(source);
+        if (raw) {
+          const terminator = ")" + raw[1] + '"';
+          const end = source.indexOf(terminator, rawStart.lastIndex);
+          if (end < 0) return out + source.slice(i);
+          out += source.slice(i, end + terminator.length);
+          i = end + terminator.length - 1;
+          continue;
+        }
+      }
+      if (ch === "/" && next === "/") { state = "line"; out += compact ? " " : "  "; i++; continue; }
+      if (ch === "/" && next === "*") { state = "block"; out += compact ? " " : "  "; i++; continue; }
       if (ch === "'" || ch === '"') {
         state = ch === "'" ? "single" : "double";
         out += literals ? " " : ch;
@@ -182,12 +225,16 @@ function maskC(source: string, literals: boolean): string {
       continue;
     }
     if (state === "line") {
-      out += ch === "\n" ? "\n" : " ";
-      if (ch === "\n") state = "code";
+      if (ch === "\n") {
+        out += "\n";
+        const before = i - (source[i - 1] === "\r" ? 2 : 1);
+        if (source[before] !== "\\") state = "code";
+      } else if (!compact) out += " ";
     } else if (state === "block") {
       if (ch === "*" && next === "/") {
-        out += "  "; i++; state = "code";
-      } else out += ch === "\n" ? "\n" : " ";
+        if (!compact) out += "  ";
+        i++; state = "code";
+      } else if (!compact) out += ch === "\n" ? "\n" : " ";
     } else if (ch === "\\") {
       out += literals ? " " : ch;
       if (next !== undefined) {
@@ -212,6 +259,11 @@ export function quotedIncludes(source: string): Array<{ name: string; start: num
 
 function lines(text: string): string[] {
   return text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+}
+
+/** Strip editable-source comments for the generated test and submission copy. */
+export function stripSourceComments(source: string, cpp = false): string {
+  return maskC(source, false, true, cpp);
 }
 
 /** Assemble only explicitly used exported symbols and their component dependencies. */
@@ -262,7 +314,7 @@ export function assembleC(
   const definitions = includeHeaders(preset) + componentCode(preset, selected);
   const result = sourceLines.slice();
   result[includeAt] = definitions + "\n";
-  return { code: result.join(""), components: preset.order.filter((id) => selected.has(id)) };
+  return { code: stripSourceComments(result.join("")), components: preset.order.filter((id) => selected.has(id)) };
 }
 
 export async function initializeHeader(folder: string, preset: LoadedPreset): Promise<string> {

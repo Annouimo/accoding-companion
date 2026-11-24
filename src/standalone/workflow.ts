@@ -7,13 +7,13 @@ import { fetchContestSnapshotForImport } from "../accoding/import";
 import { syncContest } from "../workspace/contest";
 import { WorkspaceStore } from "../workspace/store";
 import { atomicWrite, safePath } from "../workspace/fs";
-import { defaultSourceFiles, cTemplate, cppTemplate } from "../workspace/sources";
+import { defaultSourceFiles, cTemplate, cppTemplate, languages } from "../workspace/sources";
 import { compile, judge, type CaseResult, type JudgeResult, type Toolchain } from "../judge/judge";
 import { sendSubmission } from "../submissions/send";
 import { SubmissionStore, isPending } from "../submissions/store";
 import { monitorSubmissions } from "../submissions/monitor";
 import { bindingId, hash, parseImport, type Binding, type Comparison, type Problem, type Target } from "../model";
-import { assembleC, loadPreset, quotedIncludes, PRESET_MANUAL, type LoadedPreset } from "./scaffold";
+import { assembleC, loadPreset, quotedIncludes, stripSourceComments, PRESET_MANUAL, PRESET_REFERENCE, type LoadedPreset } from "./scaffold";
 import { readableStatement } from "../problems/statement";
 import { StateStore, isAccepted, activityAccepted } from "./state";
 import { installedPresets, presetForVersion, setCoursePresetVersion,
@@ -42,13 +42,15 @@ export type SampleTestReport =
   | { kind: "samples"; cases: SampleCaseReport[]; passed: number; total: number };
 
 export function toolchain(config: { c?: string; cpp?: string } = {}): Toolchain {
+  const c = process.env.ACCODING_CC || process.env.CC || config.c;
+  const cpp = process.env.ACCODING_CXX || process.env.CXX || config.cpp;
   return {
-    c: process.env.ACCODING_CC || process.env.CC || config.c ||
+    c: c || process.env.ACCODING_MANAGED_CC ||
       (process.platform === "win32" ? "gcc" : "cc"),
-    cpp: process.env.ACCODING_CXX || process.env.CXX || config.cpp ||
+    cpp: cpp || process.env.ACCODING_MANAGED_CXX ||
       (process.platform === "win32" ? "g++" : "c++"),
-    cArgs: ["-std=c99", "-O2", "-Wall", "-Wextra", "-Wno-unused-function"],
-    cppArgs: ["-std=c++17", "-O2", "-Wall", "-Wextra"],
+    cArgs: ["-std=" + languages.c.standard, "-O2", "-Wall", "-Wextra", "-Wno-unused-function"],
+    cppArgs: ["-std=" + languages.cpp.standard, "-O2", "-Wall", "-Wextra"],
     cLinkArgs: ["-lm"],
     timeoutMs: 2000,
     outputLimit: 4 * 1024 * 1024
@@ -172,7 +174,7 @@ export class StandaloneWorkflow {
     // C++ workspaces never receive the C99 exam library.
     const config = await courseSettings(root);
     if (config.language !== "c") return;
-    if (!preset) throw new Error("C99 课程缺少 C Exam Kit，请先安装数据包并选择课程脚手架版本。");
+    if (!preset) throw new Error("C 课程缺少 C Exam Kit，请先安装数据包并选择课程脚手架版本。");
     const source = sourceFor(binding, root);
     if (await fs.readFile(source, "utf8") !== cTemplate) return;
     const legacy = path.join(root, ".accoding", "scaffold", binding.bindingId, "manifest.json");
@@ -217,7 +219,7 @@ export class StandaloneWorkflow {
     let version: string;
     if (problem) {
       if (path.extname(problem.source).toLowerCase() !== ".c")
-        throw new Error("此题不使用 C99 脚手架。");
+        throw new Error("此题不使用 C 脚手架。");
       const code = await fs.readFile(problem.source, "utf8");
       const shared = sharedInclude(root, problem.source, code);
       if (shared) {
@@ -226,25 +228,26 @@ export class StandaloneWorkflow {
       } else {
         directory = await safePath(root, ".accoding/scaffold/" + problem.binding.bindingId);
         if (!(await fileExists(path.join(directory, "manifest.json"))))
-          throw new Error("此题未引用工作区中的 C99 脚手架。");
+          throw new Error("此题未引用工作区中的 C 脚手架。");
         version = "旧版快照（版本未知）";
       }
     } else {
       if (!(await fileExists(path.join(root, ".accoding", "workspace.json"))))
-        throw new Error("请先配置 C99 课程工作区。");
+        throw new Error("请先配置 C 课程工作区。");
       const config = await courseSettings(root);
-      if (config.language !== "c") throw new Error("此工作区不使用 C99 脚手架。");
+      if (config.language !== "c") throw new Error("此工作区不使用 C 脚手架。");
       if (!config.presetVersion) throw new Error("请先在设置中选择课程脚手架版本。");
       version = config.presetVersion;
       directory = await sharedPresetPath(root, version);
     }
-    const manual = await safePath(directory, PRESET_MANUAL);
-    const found = await fs.stat(manual).then(stat => stat.isFile(), error => {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return false;
-    });
-    if (!found) throw new Error("脚手架 " + version + " 没有本地函数手册。");
-    return manual;
+    for (const filename of [PRESET_REFERENCE, PRESET_MANUAL]) {
+      const artifact = await safePath(directory, filename);
+      if (await fs.lstat(artifact).then(stat => stat.isFile(), error => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        return false;
+      })) return artifact;
+    }
+    throw new Error("脚手架 " + version + " 没有本地函数手册。");
   }
 
   async activePreset(explicit?: string, root?: string): Promise<LoadedPreset | undefined> {
@@ -266,7 +269,7 @@ export class StandaloneWorkflow {
     const global = (await this.state.load()).presetPath;
     if (global) return loadPreset(global);
     // No silent fallback to the old GCD/LCM demonstration header.
-    throw new Error("此 C99 课程尚未配置正式 C Exam Kit。请先运行 npm install -g @annouimo/c-exam-kit-preset@next，再在“设置 → 更新课程资源”中设为课程默认版本。");
+    throw new Error("此 C 课程尚未配置正式 C Exam Kit。请先运行 npm install -g @annouimo/c-exam-kit-preset，再在“设置 → 更新课程资源”中设为课程默认版本。");
   }
 
   async setPreset(file?: string): Promise<void> {
@@ -295,7 +298,7 @@ export class StandaloneWorkflow {
     if (!(await fileExists(path.join(root, ".accoding", "workspace.json"))))
       throw new Error("课程尚未配置：" + root);
     const course = await courseSettings(root);
-    if (course.language !== "c") throw new Error("此课程使用 C++17：" + root);
+    if (course.language !== "c") throw new Error("此课程使用 C++：" + root);
     const found = await presetForVersion(version);
     const bindings = await new WorkspaceStore(root).list();
     const plan = await chooseUpdateTargets(root, bindings, mode, selected, version);
@@ -502,9 +505,9 @@ export class StandaloneWorkflow {
     const original = await fs.readFile(resolved.source, "utf8");
     const originalHash = hash(original);
     const ext = path.extname(resolved.source).toLowerCase();
-    let code = original;
+    let code = stripSourceComments(original, ext !== ".c");
     if (ext !== ".c") {
-      if (/^\s*#\s*include\s*"/m.test(original))
+      if (/^\s*#\s*include\s*"/m.test(code))
         throw new Error("C++ 第一版不支持自动展开自定义头文件，请先合并为单文件。");
     } else {
       const shared = sharedInclude(resolved.root, resolved.source, original);
@@ -774,8 +777,8 @@ export class StandaloneWorkflow {
       const known = defaultSourceFiles(binding.problem.target);
       const base = binding.problemDirectory ?? path.posix.dirname(known.c);
       for (const file of [source,
-        localPath(root, path.posix.join(base, "main.c")),
-        localPath(root, path.posix.join(base, "main.cpp"))]) {
+        localPath(root, path.posix.join(base, languages.c.file)),
+        localPath(root, path.posix.join(base, languages.cpp.file))]) {
         try { modified = Math.max(modified, (await fs.stat(file)).mtimeMs); }
         catch { /* Optional source may not exist. */ }
       }
@@ -785,7 +788,7 @@ export class StandaloneWorkflow {
       if (activity.sourceFile) {
         const proposed = path.resolve(activity.sourceFile);
         const allowed = path.dirname(proposed) === path.dirname(source) &&
-          (proposed === source || ["main.c", "main.cpp"].includes(path.basename(proposed)));
+          (proposed === source || [languages.c.file, languages.cpp.file].includes(path.basename(proposed)));
         if (allowed && await fileExists(proposed)) selected = proposed;
       }
       return {
@@ -810,8 +813,8 @@ export class StandaloneWorkflow {
     const files = defaultSourceFiles(problem.binding.problem.target);
     const base = problem.binding.problemDirectory ?? path.posix.dirname(files.c);
     const result = await select("选择源码语言", [
-      { label: "C (.c)", value: path.posix.join(base, "main.c") },
-      { label: "C++ (.cpp)", value: path.posix.join(base, "main.cpp") }
+      { label: "C (.c)", value: path.posix.join(base, languages.c.file) },
+      { label: "C++ (.cpp)", value: path.posix.join(base, languages.cpp.file) }
     ]);
     if (!result) return problem;
     const source = localPath(problem.root, result);

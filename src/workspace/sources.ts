@@ -1,17 +1,20 @@
 import type { Binding, Target } from "../model";
 
-export const cTemplate =
-  "#include <stdio.h>\n\nint main() {\n    return 0;\n}\n";
-// Expanded from the local VS Code Codeforces snippet; $0 is the editing cursor.
-export const cppTemplate =
-  "#include <iostream>\n\nint main() {\n    return 0;\n}\n";
+import languages from "./languages.json";
+
+export { languages };
+export const languageChoices = Object.entries(languages).map(([value, profile]) => ({
+  value: value as keyof typeof languages, label: profile.label
+}));
+export const cTemplate = languages.c.template;
+export const cppTemplate = languages.cpp.template;
 
 export function defaultSourceFiles(target: Target) {
   const base =
     target.kind === "problemset"
       ? `problems/${target.problemId}`
       : `contests/${target.contestId}/${target.problemId}`;
-  return { c: `${base}/main.c`, cpp: `${base}/main.cpp` };
+  return { c: `${base}/${languages.c.file}`, cpp: `${base}/${languages.cpp.file}` };
 }
 export function sourceLanguage(file: string): "c" | "cpp" {
   return /\.c$/i.test(file) ? "c" : "cpp";
