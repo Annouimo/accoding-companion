@@ -46,14 +46,26 @@ func checkCompiler(directory, executable string, probe compilerProbe, managed bo
 	defer cancel()
 	output := filepath.Join(directory, "probe.exe")
 	args := []string{"-std=" + probe.standard, "-iquote", "."}
+	env := os.Environ()
 	if managed {
-		// The Windows linker uses the system code page for the LTO plugin path.
-		// These small standalone programs do not use link-time optimization.
-		args = append(args, "-fno-use-linker-plugin", "-B"+filepath.Dir(executable)+string(filepath.Separator))
+		toolchain, cleanup, err := nativeCompilerPath(filepath.Dir(filepath.Dir(executable)))
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		bin := filepath.Join(toolchain, "bin")
+		executable = filepath.Join(bin, filepath.Base(executable))
+		temp, err := os.MkdirTemp(toolchain, ".probe-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(temp)
+		env = append(env, "TEMP="+temp, "TMP="+temp)
+		args = append(args, "-fno-use-linker-plugin", "-B"+bin+string(filepath.Separator))
 	}
 	cmd := exec.CommandContext(ctx, executable, append(args, probe.filename, "-o", "probe.exe")...)
 	cmd.Dir = directory
-	cmd.Env = append(os.Environ(), compilerFlags(filepath.Dir(executable))...)
+	cmd.Env = append(env, compilerFlags(filepath.Dir(executable))...)
 	if data, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s 编译失败：%w %s", probe.command, err, strings.TrimSpace(string(data)))
 	}

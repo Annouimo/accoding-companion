@@ -225,7 +225,7 @@ func run() error {
 					continue
 				}
 				current = ""
-				for _, dir := range []string{"packages", "runtime", "compiler"} {
+				for _, dir := range []string{"packages", "runtime", "compiler", "tmp"} {
 					if err := os.RemoveAll(filepath.Join(root, dir)); err != nil {
 						pause("部分安装文件未能移除：" + err.Error())
 					}
@@ -260,41 +260,55 @@ func showGuide(file string) error {
 	return openGuide(file)
 }
 
-func companion(root, installed string, args ...string) (*exec.Cmd, error) {
+func companion(root, installed string, args ...string) (*exec.Cmd, func(), error) {
 	node, err := findNode(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	entry := filepath.Join(packagePath(installed, cliPackage), "dist", "accoding.mjs")
 	cmd := exec.Command(node.node, append([]string{entry}, args...)...)
 	cmd.Env = append(os.Environ(), "ACCODING_PRESET_PACKAGE="+packagePath(installed, presetPackage))
+	cleanup := func() {}
 	if runtime.GOOS == "windows" {
 		bin := managedCompilerBin(root)
 		if isFile(filepath.Join(bin, "gcc.exe")) && isFile(filepath.Join(bin, "g++.exe")) {
+			mapped, release, err := nativeCompilerPath(root)
+			if err != nil {
+				return nil, nil, err
+			}
+			temp := filepath.Join(mapped, "tmp")
+			if err := os.MkdirAll(temp, 0700); err != nil {
+				release()
+				return nil, nil, err
+			}
+			cleanup = release
+			bin = managedCompilerBin(mapped)
 			cmd.Env = append(cmd.Env, compilerFlags(bin)...)
 			cmd.Env = append(cmd.Env, "ACCODING_MANAGED_CC="+filepath.Join(bin, "gcc.exe"),
-				"ACCODING_MANAGED_CXX="+filepath.Join(bin, "g++.exe"))
+				"ACCODING_MANAGED_CXX="+filepath.Join(bin, "g++.exe"), "TEMP="+temp, "TMP="+temp)
 		}
 	}
-	return cmd, nil
+	return cmd, cleanup, nil
 }
 
 func start(root, installed string) error {
-	cmd, err := companion(root, installed)
+	cmd, cleanup, err := companion(root, installed)
 	if err != nil {
 		return err
 	}
+	defer cleanup()
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
 }
 
 func promptWorkspaceUpdate(root, installed, version string) {
-	cmd, err := companion(root, installed, "resources", "update", version, "--preview")
+	cmd, cleanup, err := companion(root, installed, "resources", "update", version, "--preview")
 	if err != nil {
 		pause(err.Error())
 		return
 	}
 	output, err := cmd.Output()
+	cleanup()
 	if err != nil {
 		message := "无法预览课程资源。可以稍后在 Companion 的「更新课程资源」中处理。"
 		if failure, ok := err.(*exec.ExitError); ok && len(failure.Stderr) > 0 {
@@ -319,10 +333,11 @@ func promptWorkspaceUpdate(root, installed, version string) {
 	if !confirm("更新此课程的资源？") {
 		return
 	}
-	cmd, err = companion(root, installed, "resources", "update", version, "--root", plan.Root)
+	cmd, cleanup, err = companion(root, installed, "resources", "update", version, "--root", plan.Root)
 	if err == nil {
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		err = cmd.Run()
+		cleanup()
 	}
 	if err != nil {
 		pause("课程资源更新未全部完成。请查看上面的报告。")
