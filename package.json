@@ -13,6 +13,7 @@
   },
   "files": [
     "dist/accoding.mjs",
+    "docs/launcher/编译环境配置.html",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
