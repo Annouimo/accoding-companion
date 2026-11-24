@@ -77,3 +77,21 @@ func TestManagedGCCFromChinesePath(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedCompilerArgsIncludeRuntimeSearchPaths(t *testing.T) {
+	root := filepath.Join("toolchain", "mingw64")
+	prefixes := managedCompilerPrefixes(root)
+	args := managedCompilerArgs(prefixes)
+	for _, prefix := range prefixes {
+		directory := filepath.ToSlash(prefix)
+		for _, want := range []string{"-B" + directory + "/", "-L" + directory} {
+			found := false
+			for _, arg := range args {
+				found = found || arg == want
+			}
+			if !found {
+				t.Fatalf("missing compiler argument %q in %v", want, args)
+			}
+		}
+	}
+}
