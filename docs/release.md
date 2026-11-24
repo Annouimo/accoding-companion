@@ -1,41 +1,36 @@
 # Accoding Companion 发布与验收
 
-当前处于开发预览阶段。**未授权公开 npm 发布。** 主程序与 C Exam Kit npm 数据包中的 `private:true` 是防误发布保险。任何切换为可发布状态必须经过用户最终验收。
+主程序和 C Exam Kit 资源包独立维护、独立发布。日常提交与 PR 验证不发布 npm 或 GitHub Release；正式发布通过人工触发 GitHub Actions 完成。源码中的 `private: true` 保留为防误发布措施，发布工作流只修改 runner 中的临时副本。
 
 ## 发行物
 
-- `@annouimo/accoding-companion`：Node.js 22.12+ 的单文件 `dist/accoding.mjs`，以及 README、许可、安装引导；**不安装 TypeScript、Ink、React 等构建期包**，构建时已全部打入 JS 文件。
-- `@annouimo/c-exam-kit-preset`：纯数据 `preset/manifest.json` 和 `preset/components/`，无安装时执行脚本；在独立 `Annouimo/c-exam-kit` 仓库维护。
-- `install.sh` 与 `install.ps1`：公开、可检查的脚本，负责检测 Node/npm，主动查询 npm 版本并选择更新全部或其中一项。用户不必装 Bun。
-- GitHub Release：版本说明、安装脚本和可选备份下载。不发布多平台二进制作为常规发行渠道。
+- `@annouimo/accoding-companion`：Node.js 22.12+ 的单文件 CLI，构建期依赖打入 JS 文件。
+- `@annouimo/c-exam-kit-preset`：独立仓库维护的纯数据包。0.6.7 起使用内联组件的 `preset/manifest.json` 和 `preset/reference.json`；旧工作区的 v1 资源与 Markdown 手册仍受支持。
+- GitHub Release：Windows x64/ARM64、macOS x64/ARM64 原生启动器 ZIP，随包附离线 HTML 使用说明。启动器首次安装时检查 Node.js；Windows x64 在缺少可用 C/C++ 编译器时安装受管理的便携 GCC。
 
-主程序和模板都分别使用 `next` 预览、`latest` 稳定发行标签。程序平时不检查新版本；只有用户再次运行安装器才检查更新。
+主程序和资源包分别维护版本号。仅更新函数时不必提升 Companion 版本，但改变资源格式时必须先发布兼容的 Companion。用户从启动器检查更新；TUI 不自动修改课程资源。
 
-## 开发与测试要求
+## 发布前验收
 
-- 普通提交：本地 typecheck / regression，不运行全平台矩阵。
-- 合并前：Node.js 22/24/26 的 CLI 检查、基础业务回归、至少一次真实 TTY 交互验证。
-- 发布前：macOS Apple Silicon 与 Windows 11 双平台人工验收；Windows 家庭版、PowerShell、终端中文、GCC/Dev-C++、macOS Terminal/Ghostty。
-- 安全：Keychain/DPAPI 凭据、目录符号链接、外部路径、写事务、中断恢复、脚手架升级回退。
-- 回归：未 AC、AC、空题、自选批量升级；源文件、`题目.md` 不被覆盖；旧数据迁移冲突不删除原文件；网络超时和 OJ 提交状态不确定时不重复 POST。
-- npm 发行前：通过 `npm pack --dry-run` 检查仅有必要文件，并在全新系统的临时目录中用本地 `.tgz` 安装、运行测试；检查包的 `bin`、shebang、文件权限和版本号。
-- 安装器验收：初次安装、Node 缺失、无权限、离线、包名冲突、重复运行、软件单独升级、脚手架单独下载。
-- 隐私：不得向诊断日志、CI 记录或发行包输出账号密码、会话 Cookie。
+- CLI：`npm run typecheck`、`npm test`、`npm run build`、真实 TTY smoke test。
+- 启动器：macOS、Windows、Linux 上的 Go 测试与 launcher smoke test。Windows x64 必须真实下载固定版本 GCC，在含中文和空格的目录中分别编译、链接、运行 C/C++ 程序。Node.js 安装也需覆盖中文目录。
+- ZIP：四个平台/架构均成功构建，包含对应原生启动器、版本匹配的 HTML 和图片、许可文件。
+- 工作区：测试和 OJ 提交复用同一份精简后的源码；已改动或无法判断状态的题目不自动升级。旧数据迁移只复制，冲突不覆盖。
+- 实机：macOS Apple Silicon、Windows 11、中文终端、首次安装、重复运行、独立升级、断网启动、卸载、真实 Accoding 登录与提交。自动化测试不能代替账号实测。
+- 安全：凭据、目录符号链接、外部路径、写事务、中断恢复；诊断日志及发行包不含账号、密码或 Cookie。
 
-## 正式发布步骤（验收后）
+## 正式发布顺序
 
-1. 测试通过并由用户确认目标版本、更新日志与 npm 包名。
-2. 对 C Exam Kit 的 npm 数据目录生成版本包，确认组件完整、许可齐全，发布至 `next` 或 `latest`。
-3. 在 Accoding Companion 中以该数据包验证安装器与现有工作区；构建主程序，检查最终 npm 包内容。
-4. 发布 CLI 到对应发行标签，验证命令 `accoding --version`、`accoding --help` 和本地测试。
-5. 手动创建 GitHub Release，链接已发布的版本与对应安装脚本。
-6. 不自动修改旧课程文件夹，不自动批量升级题目脚手架。
+涉及新资源格式时，以 0.2.4 / 0.6.7 为例：
 
-推荐在配置 npm Trusted Publishing 后进行手动触发的 GitHub Actions 发布，以减少长期 npm 发布令牌。不得把公开正式发行与日常 push 绑定。
+1. 确认目标提交已合入 main，所有必要回归测试通过。HTML 定稿必须经过用户认可。
+2. 在 Companion 的 [Publish npm stable release](https://github.com/Annouimo/accoding-companion/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.2.4`。如只检查构建则使用 `DRY_RUN`。
+3. 验证 `npm view @annouimo/accoding-companion@latest version` 已返回 0.2.4。
+4. 在 C Exam Kit 的 [Publish npm stable release](https://github.com/Annouimo/c-exam-kit/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.6.7`。
+5. 验证 `npm view @annouimo/c-exam-kit-preset@latest version` 已返回 0.6.7。npm 的版本验证未完成时不要抢先发布启动器。
+6. 回到 Companion 发布工作流选择 main、`PUBLISH_LAUNCHERS`、`expected_version=0.2.4`、`expected_preset_version=0.6.7`。工作流将核对两个 npm latest 版本后创建 GitHub Release 并上传四个 ZIP。
+7. 检查下载入口与版本号，解压后做实际首次安装和启动验收。
 
-## 当前开发限制
+仅更新资源内容且不改变格式时，可单独发布资源包。不要为失败的构建或未发布的修复增加版本号；如果版本已经发布到 npm，则不能覆盖该版本。
 
-- 安装器依赖两个**尚未公开发布**的 npm 包；直接执行会查询失败，不代表 Node 安装异常。
-- 真实 Accoding 账号提交链路在旧独立 CLI 曾由用户实测；迁至新仓库后的全屏 TUI 尚需账号实机验收。
-- 迁移目前是显式的只复制导入，尚需全面验证历史账号状态和旧提交记录。
-- `private:true` 移除与 `latest` 发布必须在验收后执行。
+正式 npm 发布使用 Trusted Publishing/OIDC；不在源码或工作流中保存长期 npm 令牌。
