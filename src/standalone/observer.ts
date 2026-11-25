@@ -111,6 +111,10 @@ export async function prepareObservation(app: StandaloneWorkflow, problem: Resol
 export async function runObservation(task: PreparedObservation): Promise<void> {
   try {
     if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("运行观察需要交互终端。");
+    // Ink has exited, but Node may still have a flowing TTY read handle.
+    // Stop parent reads before handing the terminal file descriptors to Go.
+    process.stdin.pause();
+    if (process.stdin.isRaw) process.stdin.setRawMode(false);
     await new Promise<void>((resolve,reject) => {
       const child = spawn(task.binary, ["--session",task.sessionPath], { stdio: "inherit", shell: false });
       // Both programs share the terminal process group. Do not exit the parent
