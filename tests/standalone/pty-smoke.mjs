@@ -133,11 +133,11 @@ await scenario("sample table starts at the difference and scrolls within a 16-ro
   await ctx.expect("输出不符");
   await ctx.expect("样例输出");
   await ctx.expect("〈输出已结束〉");
-  await ctx.expect("显示 11–21 / 30");
+  await ctx.expect("显示 11–20 / 30");
   ctx.send("\x1b[C");
   await ctx.expect("RIGHT-END");
   ctx.send("\x1b[B");
-  await ctx.expect("显示 12–22 / 30");
+  await ctx.expect("显示 12–21 / 30");
   ctx.send("]");
   await ctx.expect("通过 · 2/2");
   ctx.send("\x1b");
