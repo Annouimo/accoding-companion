@@ -35,3 +35,7 @@
 仅更新资源内容且不改变格式时，可单独发布资源包。已有原生启动器可直接更新两个 npm 包；ZIP 内的使用说明是独立文件，需重新下载新版 ZIP 才会同步更新。不要为失败的构建或未发布的修复增加版本号；如果版本已经发布到 npm，则不能覆盖该版本。
 
 正式 npm 发布使用 Trusted Publishing/OIDC；不在源码或工作流中保存长期 npm 令牌。
+
+### 本地界面验收（无须安装 npm 依赖）
+
+PR 的 Verify native launcher and external compilers 工作流在 CLI 测试通过后保存 `verified-cli`（`dist/accoding.mjs`）。下载并解压对应提交的构建产物，使用 Node.js 运行；在临时离线工作区中分别检查通过、警告、编译失败、输出差异、日志、运行异常和长内容，调整终端至 120×30、80×24、40×12 检查导航。界面截图应来自实际终端，不能代替 Windows/macOS 实机验证。
