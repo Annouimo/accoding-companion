@@ -645,7 +645,8 @@ export class StandaloneWorkflow {
 
   async submit(
     resolved: ResolvedProblem, lang?: string, codeSnapshot?: string,
-    pickLanguage?: (choices: string[], fallback: boolean) => Promise<string | undefined>
+    pickLanguage?: (choices: string[], fallback: boolean) => Promise<string | undefined>,
+    report?: (result: SampleTestReport) => void
   ): Promise<void> {
     const account = await this.account();
     if (!account) throw new Error("未登录");
@@ -669,9 +670,10 @@ export class StandaloneWorkflow {
       config, undefined, false, path.dirname(resolved.source)) : undefined;
     if (checked) try {
       const diagnostics = await this.compilerDiagnostics(prepared, checked.result, config!);
+      if (diagnostics.length) report?.({kind:"compile", output:checked.result, diagnostics});
       if (checked.result.exitCode !== 0 || checked.result.reason)
-        throw new Error("提交前编译失败，未上传：\n" + diagnosticText(diagnostics));
-      if (diagnostics.length) console.log("编译诊断：\n" + diagnosticText(diagnostics));
+        throw new Error("提交前编译失败，未上传" + (report ? "，请查看编译诊断。" : "：\n" + diagnosticText(diagnostics)));
+      if (diagnostics.length) console.log(report ? "提交前编译诊断 " + diagnostics.length + " 项（查看测试详情）" : "编译诊断：\n" + diagnosticText(diagnostics));
     } finally {
       await fs.rm(checked.directory, { recursive: true, force: true });
     }
