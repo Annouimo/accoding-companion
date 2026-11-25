@@ -259,13 +259,13 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
   const padCell = (text: string, cells: number) => text + " ".repeat(Math.max(0, cells - stringWidth(text)));
   const compact = width < 55;
   const tabLabels: Record<View, string> = {sample:"样例对比",diagnostic:"编译诊断",log:"运行日志"};
-  const warningLabel = warningCount(diagnostics) ? " · " + warningCount(diagnostics) + " 项警告" : "";
+  const warningLabel = warningCount(diagnostics) ? (compact ? " · 警告 " + warningCount(diagnostics) : " · " + warningCount(diagnostics) + " 项警告") : "";
   const compileOk = report.kind === "samples" || (report.output.exitCode === 0 && !report.output.reason);
   const sampleOk = report.kind === "samples" && report.passed === report.total;
   return <Box flexDirection="column" paddingX={1} height={Math.max(1, rows || 24)}>
     <Text bold wrap="truncate-end">
       <Text color={compileOk ? "green" : "red"}>{compileOk ? "编译成功" : "编译失败"}</Text>
-      {report.kind === "samples" ? <Text color={sampleOk ? "green" : "red"}>{" · 本地样例 " + report.passed + "/" + report.total + " 通过"}</Text> : null}
+      {report.kind === "samples" ? <Text color={sampleOk ? "green" : "red"}>{(compact ? " · " : " · 本地样例 ") + report.passed + "/" + report.total + " 通过"}</Text> : null}
       <Text color="yellow">{warningLabel}</Text>
     </Text>
     <Text wrap="truncate-end">{compact ? "[" + tabLabels[view] + "] " + (views.indexOf(view)+1) + "/" + views.length + " · Tab 切换" :
@@ -292,6 +292,6 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
     </Box>
     <Text dimColor wrap="truncate-end">{windowOf(range + (offset ? " · 横向 " + (offset + 1) : "") +
       (table && differences.length ? " · 差异 " + (differences.indexOf(anchor)+1) + "/" + differences.length : ""), width)}</Text>
-    <Text dimColor wrap="truncate-end">{windowOf(compact ? "Esc 返回 Tab 视图 [] 切换 ↑↓←→" : footer, width)}</Text>
+    <Text dimColor wrap="truncate-end">{windowOf(compact ? "Esc 返回 Tab 视图 [] ↑↓←→" + (table ? " N/P" : view==="diagnostic" && diagnostic?.explanation ? " Enter" : "") : footer, width)}</Text>
   </Box>;
 }
