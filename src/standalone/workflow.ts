@@ -9,7 +9,7 @@ import { WorkspaceStore } from "../workspace/store";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { defaultSourceFiles, cTemplate, cppTemplate, languages } from "../workspace/sources";
 import { compile, judge, type CaseResult, type JudgeResult, type Toolchain } from "../judge/judge";
-import { parseCompilerDiagnostics, preferMappedDiagnostics, diagnosticText, type CompilerDiagnostic } from "./compiler-diagnostics";
+import { parseCompilerDiagnostics, preferMappedDiagnostics, attachDiagnosticContext, diagnosticText, type CompilerDiagnostic } from "./compiler-diagnostics";
 import { sendSubmission } from "../submissions/send";
 import { SubmissionStore, isPending } from "../submissions/store";
 import { monitorSubmissions } from "../submissions/monitor";
@@ -557,12 +557,20 @@ export class StandaloneWorkflow {
     prepared: { source: string; code: string; diagnosticCode?: string },
     formal: JudgeResult["compilation"], config: Toolchain
   ): Promise<CompilerDiagnostic[]> {
-    const original = parseCompilerDiagnostics(formal);
+    const sourceName = path.basename(prepared.source);
+    const original = attachDiagnosticContext(parseCompilerDiagnostics(formal), prepared.code, sourceName, false);
     if (!original.length || !prepared.diagnosticCode || formal.reason) return original;
     try {
       const mapped = await compile(prepared.source, prepared.diagnosticCode, config,
         undefined, false, path.dirname(prepared.source));
-      try { return preferMappedDiagnostics(formal, mapped.result); }
+      try {
+        const chosen = preferMappedDiagnostics(formal, mapped.result);
+        const mappedEntries = parseCompilerDiagnostics(mapped.result);
+        // Use the mapped snapshot only when every location and original diagnostic agrees.
+        const usesMapped = chosen.length === mappedEntries.length &&
+          chosen.every((d,i) => d.raw === mappedEntries[i].raw);
+        return usesMapped ? attachDiagnosticContext(chosen, prepared.diagnosticCode, sourceName, true) : original;
+      }
       finally { await fs.rm(mapped.directory, { recursive: true, force: true }); }
     } catch {
       return original;
