@@ -26,7 +26,8 @@ const execFileAsync = promisify(execFile);
 async function globalPreset(): Promise<InstalledPreset | undefined> {
   // npm resolves dependencies relative to this package, even if a legacy
   // launcher installs another version at the top level.
-  const dependency = resolvePackageFile(DATA_PACKAGE, "package.json");
+  const dependency = process.env.ACCODING_PRESET_LEGACY_ONLY === "1" ? undefined :
+    resolvePackageFile(DATA_PACKAGE, "package.json");
   if (dependency) {
     const installed = await readInstalledPreset(path.dirname(dependency));
     if (installed) return installed;
