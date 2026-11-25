@@ -9,6 +9,7 @@ import { activityAccepted, type ApplicationState } from "./state";
 import { type UpdateMode } from "./preset-manager";
 import { courseSettings, droppedPath } from "./workspaces";
 import { SampleOutput } from "./sample-output";
+import { warningCount } from "./compiler-diagnostics";
 import { Manual, ReferenceManual, initialReferenceView, parseReference, type ReferenceView } from "./manual";
 import { LoginForm } from "./login-form";
 import { compilerErrorMessage } from "./compiler-guide";
@@ -400,7 +401,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       try { await openFolder(problem.source); }
       catch (error) { setMessage(String(error)); }
     } },
-    ...(result ? [{ id: "details", label: "查看测试详情", run: () => setDetails(result) }] : []),
+    ...(result ? [{ id: "details", label: "查看测试详情" + (warningCount(result.diagnostics) ? "（" + warningCount(result.diagnostics) + " 项警告）" : ""), run: () => setDetails(result) }] : []),
     { id: "more", label: "本题其他操作", run: more }
   ] : group ? [
     ...group.problems.filter((entry) => !onlyPending || !accepted(entry)).map((entry) => ({
@@ -500,6 +501,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
         {result.kind === "compile" ? "编译失败" :
           "本地样例 " + result.passed + "/" + result.total + " 通过"}
       </Text> : null}
+      {!panel && result && warningCount(result.diagnostics) > 0 ? <Text color="yellow">编译警告 {warningCount(result.diagnostics)} 项 · 可在测试详情查看</Text> : null}
       {message ? <Text>{message}</Text> : null}
       {busy && !panel ? <Text color="cyan">{busy}</Text> : null}
       {panel ? <Text bold>{panel.title}</Text> : null}
