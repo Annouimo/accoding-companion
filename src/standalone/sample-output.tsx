@@ -221,7 +221,7 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
       return;
     }
     if (key.return && view === "diagnostic" && diagnostic?.explanation) {
-      update({raw: !raw, top: 0, offset: 0}); return;
+      update({raw: !raw, top: raw ? 0 : Math.max(0, messages.length - 1), offset: 0}); return;
     }
     if (table && ["n", "p"].includes(char.toLowerCase())) {
       const next = char.toLowerCase() === "n" ? differences.find(i => i > anchor) :
