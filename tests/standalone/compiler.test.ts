@@ -6,6 +6,8 @@ import path from "node:path";
 import { compile } from "../../src/judge/judge";
 import { runProcess } from "../../src/judge/process";
 import { toolchain } from "../../src/standalone/workflow";
+import { parseCompilerDiagnostics, preferMappedDiagnostics } from "../../src/standalone/compiler-diagnostics";
+import { lineDiff } from "../../src/standalone/line-diff";
 
 test("missing compiler is reported only when compilation is requested", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-compiler-"));
@@ -51,4 +53,44 @@ test("external C and C++ compilers work in a Unicode workspace; syntax errors st
   } finally {
     await fs.rm(parent, { recursive: true, force: true });
   }
+});
+
+test("compiler diagnostic grouping preserves notes, unknown messages and Windows paths", () => {
+  const raw = "C:\\中文\\main.c:7:9: warning: unused variable 'index' [-Wunused-variable]\n" +
+    "  int index = 1;\nC:\\中文\\main.c:3:2: note: related location\n";
+  const result = {stdout:"", stderr:raw, exitCode:0, signal:null, elapsedMs:1};
+  const diagnostics = parseCompilerDiagnostics(result);
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0].location, "C:\\中文\\main.c:7:9");
+  assert.match(diagnostics[0].explanation!, /未被使用/);
+  assert.match(diagnostics[0].raw, /note: related location/);
+  assert.equal(parseCompilerDiagnostics({...result, stderr:"unknown linker output", exitCode:1})[0].raw, "unknown linker output");
+  assert.equal(preferMappedDiagnostics(result, {...result, stderr:"main.c:99: warning: another warning"})[0].location, diagnostics[0].location);
+});
+
+test("comment-preserving #line diagnostics do not change formal source or hide warnings", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-mapping-"));
+  const config = toolchain();
+  const code = "int main(void) {\n/* comment\n second line */\n int index = 0;\n return 0;\n}\n";
+  try {
+    const formal = await compile(path.join(root,"main.c"), code.replace(/\/\*[\s\S]*?\*\//, " "), config);
+    try {
+      const mapped = await compile(path.join(root,"main.c"), '#line 1 "main.c"\n' + code, config);
+      try {
+        assert.equal(formal.result.exitCode,0,formal.result.stderr);
+        assert.equal(mapped.result.exitCode,0,mapped.result.stderr);
+        const diagnostics = preferMappedDiagnostics(formal.result,mapped.result);
+        assert.ok(diagnostics.some(d => d.location?.endsWith("main.c:4:6") || /main\.c:4(?::\d+)?$/.test(d.location ?? "")), mapped.result.stderr);
+      } finally { await fs.rm(mapped.directory,{recursive:true,force:true}); }
+    } finally { await fs.rm(formal.directory,{recursive:true,force:true}); }
+  } finally { await fs.rm(root,{recursive:true,force:true}); }
+});
+
+test("inline diff highlights only changed characters, including insertions and Unicode", () => {
+  const changed = (a: string,b: string) => lineDiff(a,b).map(parts => parts.filter(p => p.changed).map(p=>p.text).join(""));
+  assert.deepEqual(changed("David 85 91","David 83 91"),["5","3"]);
+  assert.deepEqual(changed("12345678","123678"),["45",""]);
+  assert.deepEqual(changed("你好😀世界","你好😁世界"),["😀","😁"]);
+  assert.deepEqual(changed("a b","a  b"),[""," "]);
+  assert.deepEqual(changed("a".repeat(30000)+"X","a".repeat(30000)+"Y"),["X","Y"]);
 });
