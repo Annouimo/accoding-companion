@@ -185,6 +185,12 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p 'require("./package.json").version')"
-          gh release create "v$version" launcher-dist/*.zip \
-            --target "$GITHUB_SHA" --title "Accoding Companion $version" \
-            --notes "Download the ZIP for your operating system and architecture and extract all files. Open Accoding Launcher.exe on Windows or Accoding Launcher.command on macOS. The package includes an offline HTML guide."
+          notes="docs/releases/$version.md"
+          if [[ -f "$notes" ]]; then
+            gh release create "v$version" launcher-dist/*.zip \
+              --target "$GITHUB_SHA" --title "Accoding Companion $version" --notes-file "$notes"
+          else
+            gh release create "v$version" launcher-dist/*.zip \
+              --target "$GITHUB_SHA" --title "Accoding Companion $version" \
+              --notes "Download the ZIP for your operating system and architecture and extract all files. Open Accoding Launcher.exe on Windows or Accoding Launcher.command on macOS. The package includes an offline HTML guide."
+          fi

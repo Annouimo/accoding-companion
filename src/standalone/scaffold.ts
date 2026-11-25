@@ -268,10 +268,12 @@ export function stripSourceComments(source: string, cpp = false): string {
 
 /** Assemble only explicitly used exported symbols and their component dependencies. */
 export function assembleC(
-  source: string, preset: LoadedPreset, header = preset.manifest.headerFile
+  source: string, preset: LoadedPreset, header = preset.manifest.headerFile,
+  sourceName = "main.c"
 ): {
   code: string;
   components: string[];
+  diagnosticCode: string;
 } {
   const withoutComments = lines(maskC(source, false));
   const sourceLines = lines(source);
@@ -314,7 +316,14 @@ export function assembleC(
   const definitions = includeHeaders(preset) + componentCode(preset, selected);
   const result = sourceLines.slice();
   result[includeAt] = definitions + "\n";
-  return { code: stripSourceComments(result.join("")), components: preset.order.filter((id) => selected.has(id)) };
+  const components = preset.order.filter((id) => selected.has(id));
+  const diagnosticLines = sourceLines.slice();
+  diagnosticLines[includeAt] = '#line 1 "preset/headers.h"\n' + includeHeaders(preset) +
+    components.map(id => "\n#line 1 " + JSON.stringify("preset/" + id + ".c") +
+      "\n" + preset.code.get(id)! + "\n").join("") +
+    "\n#line " + (includeAt + 2) + " " + JSON.stringify(sourceName) + "\n";
+  const diagnosticCode = "#line 1 " + JSON.stringify(sourceName) + "\n" + diagnosticLines.join("");
+  return { code: stripSourceComments(result.join("")), components, diagnosticCode };
 }
 
 export async function initializeHeader(folder: string, preset: LoadedPreset): Promise<string> {

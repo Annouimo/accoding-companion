@@ -15,6 +15,7 @@
 - CLI：`npm run typecheck`、`npm test`、`npm run build`、真实 TTY smoke test。
 - 启动器：macOS、Windows、Linux 上的 Go 测试与 launcher smoke test。Node.js 安装覆盖中文目录。单独使用外部 GCC 验证含中文和空格的工作区中 C/C++ 编译、链接、运行，以及缺少编译器时的提示；不要求启动器下载 GCC。
 - ZIP：四个平台/架构均成功构建，包含对应原生启动器、版本匹配的 HTML、独立编译环境配置指引和图片、许可文件。
+- 诊断与测试详情：验证成功编译的警告、原始源码行号（包括多行注释）、字符级差异高亮、长行滚动、视图切换、stderr 与输出比较分离；警告不阻止提交，诊断源码不得上传。
 - 工作区：测试和 OJ 提交复用同一份精简后的源码；已改动或无法判断状态的题目不自动升级。旧数据迁移只复制，冲突不覆盖。
 - 实机：macOS Apple Silicon、Windows 11、中文终端、首次安装、重复运行、独立升级、断网启动、卸载、真实 Accoding 登录与提交。自动化测试不能代替账号实测。
 - 安全：凭据、目录符号链接、外部路径、写事务、中断恢复；诊断日志及发行包不含账号、密码或 Cookie。
@@ -34,3 +35,11 @@
 仅更新资源内容且不改变格式时，可单独发布资源包。已有原生启动器可直接更新两个 npm 包；ZIP 内的使用说明是独立文件，需重新下载新版 ZIP 才会同步更新。不要为失败的构建或未发布的修复增加版本号；如果版本已经发布到 npm，则不能覆盖该版本。
 
 正式 npm 发布使用 Trusted Publishing/OIDC；不在源码或工作流中保存长期 npm 令牌。
+
+### 本地界面验收（无须安装 npm 依赖）
+
+PR 的 Verify native launcher and external compilers 工作流在 CLI 测试通过后保存 `verified-cli`（`dist/accoding.mjs`）。下载并解压对应提交的构建产物，使用 Node.js 运行；在临时离线工作区中分别检查通过、警告、编译失败、输出差异、日志、运行异常和长内容，调整终端至 120×30、80×24、40×12 检查导航。界面截图应来自实际终端，不能代替 Windows/macOS 实机验证。
+
+### 仅发布 Companion（0.2.7）
+
+资源格式未变，不发布 C Exam Kit。先在 main 以 `PUBLISH_LATEST`、`expected_version=0.2.7` 发布 CLI，确认 npm latest 已更新后查询 `npm view @annouimo/c-exam-kit-preset@latest version`，再以 `PUBLISH_LAUNCHERS`、`expected_version=0.2.7`、`expected_preset_version=<实际 latest>` 发布启动器。版本说明见 [0.2.7](releases/0.2.7.md)。继续使用人工触发，不改变发布授权机制。

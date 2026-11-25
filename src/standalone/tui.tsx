@@ -9,6 +9,7 @@ import { activityAccepted, type ApplicationState } from "./state";
 import { type UpdateMode } from "./preset-manager";
 import { courseSettings, droppedPath } from "./workspaces";
 import { SampleOutput } from "./sample-output";
+import { warningCount } from "./compiler-diagnostics";
 import { Manual, ReferenceManual, initialReferenceView, parseReference, type ReferenceView } from "./manual";
 import { LoginForm } from "./login-form";
 import { compilerErrorMessage } from "./compiler-guide";
@@ -349,8 +350,16 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     if (!problem) return;
     const code = tested ? app.testedCode(problem.source) : undefined;
     if (tested && code === undefined) { setMessage("请先重新运行样例。"); return; }
+    let report: SampleTestReport | undefined;
     await run("正在提交…", () => app.submit(problem, undefined, code,
-      (choices, fallback) => pick(fallback ? "题库提交语言（不计入比赛）" : "提交语言", choices)));
+      (choices, fallback) => pick(fallback ? "题库提交语言（不计入比赛）" : "提交语言", choices),
+      value => { report = value; }));
+    if (report) {
+      const completed = report;
+      setTestResult(all => ({ ...all, [problem.source]: completed }));
+      if (completed.kind === "compile" &&
+          (completed.output.exitCode !== 0 || completed.output.reason)) setDetails(completed);
+    }
   }
 
   function more() {
@@ -400,7 +409,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       try { await openFolder(problem.source); }
       catch (error) { setMessage(String(error)); }
     } },
-    ...(result ? [{ id: "details", label: "查看测试详情", run: () => setDetails(result) }] : []),
+    ...(result ? [{ id: "details", label: "查看测试详情" + (warningCount(result.diagnostics) ? "（" + warningCount(result.diagnostics) + " 项警告）" : ""), run: () => setDetails(result) }] : []),
     { id: "more", label: "本题其他操作", run: more }
   ] : group ? [
     ...group.problems.filter((entry) => !onlyPending || !accepted(entry)).map((entry) => ({
@@ -496,10 +505,12 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
         {path.basename(problem.source)} · OJ <Text color={accepted(problem) ? "green" : undefined}>
           {verdict(problem) ?? "未提交"}</Text>
       </Text> : null}
-      {!panel && result ? <Text color={passed ? "green" : "red"}>
-        {result.kind === "compile" ? "编译失败" :
+      {!panel && result ? <Text color={(result.kind === "compile" ?
+        result.output.exitCode === 0 && !result.output.reason : result.passed === result.total) ? "green" : "red"}>
+        {result.kind === "compile" ? (result.output.exitCode === 0 && !result.output.reason ? "编译成功" : "编译失败") :
           "本地样例 " + result.passed + "/" + result.total + " 通过"}
       </Text> : null}
+      {!panel && result && warningCount(result.diagnostics) > 0 ? <Text color="yellow">编译警告 {warningCount(result.diagnostics)} 项 · 可在测试详情查看</Text> : null}
       {message ? <Text>{message}</Text> : null}
       {busy && !panel ? <Text color="cyan">{busy}</Text> : null}
       {panel ? <Text bold>{panel.title}</Text> : null}

@@ -23,6 +23,13 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: node tests/standalone/pty-smoke.mjs dist/accoding.mjs
+      - name: Save verified CLI for offline acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-cli
+          path: dist/accoding.mjs
+          if-no-files-found: error
+          retention-days: 7
   launcher:
     strategy:
       matrix:
