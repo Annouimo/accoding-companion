@@ -141,7 +141,7 @@ await scenario("sample table starts at the difference and scrolls within a 16-ro
   ctx.send("]");
   await ctx.expect("通过 · 2/2");
   ctx.send("\t"); await ctx.expect("警告 1/1"); await ctx.expect("未被使用");
-  ctx.send("\r"); await ctx.expect("unused variable");
+  ctx.send("\r"); ctx.send("\x1b[F"); await ctx.expect("unused variable");
   ctx.send("\t"); await ctx.expect("stderr（不参与答案比较）"); await ctx.expect("trace sample");
   ctx.send("\t"); await ctx.expect("通过 · 2/2");
   ctx.send("["); await ctx.expect("显示 12–20 / 30");
