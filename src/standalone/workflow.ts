@@ -9,6 +9,7 @@ import { WorkspaceStore } from "../workspace/store";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { defaultSourceFiles, cTemplate, cppTemplate, languages } from "../workspace/sources";
 import { compile, judge, type CaseResult, type JudgeResult, type Toolchain } from "../judge/judge";
+import { parseCompilerDiagnostics, preferMappedDiagnostics, diagnosticText, type CompilerDiagnostic } from "./compiler-diagnostics";
 import { sendSubmission } from "../submissions/send";
 import { SubmissionStore, isPending } from "../submissions/store";
 import { monitorSubmissions } from "../submissions/monitor";
@@ -38,8 +39,8 @@ export type SampleCaseReport = CaseResult & {
 };
 
 export type SampleTestReport =
-  | { kind: "compile"; output: JudgeResult["compilation"] }
-  | { kind: "samples"; cases: SampleCaseReport[]; passed: number; total: number };
+  | { kind: "compile"; output: JudgeResult["compilation"]; diagnostics?: CompilerDiagnostic[] }
+  | { kind: "samples"; cases: SampleCaseReport[]; passed: number; total: number; diagnostics?: CompilerDiagnostic[] };
 
 export function toolchain(config: { c?: string; cpp?: string } = {}): Toolchain {
   const c = process.env.ACCODING_CC || process.env.CC || config.c;
@@ -49,7 +50,7 @@ export function toolchain(config: { c?: string; cpp?: string } = {}): Toolchain 
       (process.platform === "win32" ? "gcc" : "cc"),
     cpp: cpp ||
       (process.platform === "win32" ? "g++" : "c++"),
-    cArgs: ["-std=" + languages.c.standard, "-O2", "-Wall", "-Wextra", "-Wno-unused-function"],
+    cArgs: ["-std=" + languages.c.standard, "-O2", "-Wall", "-Wextra", "-Wno-unused-function", "-Wshadow", "-Wformat=2"],
     cppArgs: ["-std=" + languages.cpp.standard, "-O2", "-Wall", "-Wextra"],
     cLinkArgs: ["-lm"],
     timeoutMs: 2000,
@@ -500,12 +501,14 @@ export class StandaloneWorkflow {
   }
 
   async prepare(resolved: ResolvedProblem): Promise<{
-    source: string; code: string; originalHash: string
+    source: string; code: string; diagnosticCode: string; originalHash: string
   }> {
     const original = await fs.readFile(resolved.source, "utf8");
     const originalHash = hash(original);
     const ext = path.extname(resolved.source).toLowerCase();
     let code = stripSourceComments(original, ext !== ".c");
+    const sourceName = path.basename(resolved.source);
+    let diagnosticCode = "#line 1 " + JSON.stringify(sourceName) + "\n" + original;
     if (ext !== ".c") {
       if (/^\s*#\s*include\s*"/m.test(code))
         throw new Error("C++ 第一版不支持自动展开自定义头文件，请先合并为单文件。");
@@ -513,7 +516,8 @@ export class StandaloneWorkflow {
       const shared = sharedInclude(resolved.root, resolved.source, original);
       if (shared) {
         const preset = await loadPreset(await sharedPresetPath(resolved.root, shared.key));
-        return { source: resolved.source, code: assembleC(original, preset, shared.include).code, originalHash };
+        const assembled = assembleC(original, preset, shared.include, sourceName);
+        return { source: resolved.source, code: assembled.code, diagnosticCode: assembled.diagnosticCode, originalHash };
       }
       const presetFile = path.join(resolved.root, ".accoding", "scaffold",
         resolved.binding.bindingId, "manifest.json");
@@ -540,11 +544,29 @@ export class StandaloneWorkflow {
           if (visible !== expected)
             throw new Error("exam.h 已被修改或不是本程序生成的入口文件，" +
               "为确保本地编译和 OJ 提交一致，已停止源码展开。");
-          code = assembleC(original, preset).code;
+          const assembled = assembleC(original, preset, preset.manifest.headerFile, sourceName);
+          code = assembled.code;
+          diagnosticCode = assembled.diagnosticCode;
         }
       }
     }
-    return { source: resolved.source, code, originalHash };
+    return { source: resolved.source, code, diagnosticCode, originalHash };
+  }
+
+  private async compilerDiagnostics(
+    prepared: { source: string; code: string; diagnosticCode?: string },
+    formal: JudgeResult["compilation"], config: Toolchain
+  ): Promise<CompilerDiagnostic[]> {
+    const original = parseCompilerDiagnostics(formal);
+    if (!original.length || !prepared.diagnosticCode || formal.reason) return original;
+    try {
+      const mapped = await compile(prepared.source, prepared.diagnosticCode, config,
+        undefined, false, path.dirname(prepared.source));
+      try { return preferMappedDiagnostics(formal, mapped.result); }
+      finally { await fs.rm(mapped.directory, { recursive: true, force: true }); }
+    } catch {
+      return original;
+    }
   }
 
   async test(resolved: ResolvedProblem, report?: (result: SampleTestReport) => void): Promise<boolean> {
@@ -558,12 +580,14 @@ export class StandaloneWorkflow {
       console.log("未找到官方样例，不能自动判定正确。");
       return false;
     }
+    const config = await this.configuredToolchain();
     const result = await judge(prepared.source, prepared.code, cases,
-      await this.configuredToolchain(), undefined, path.dirname(resolved.source));
+      config, undefined, path.dirname(resolved.source));
     try {
+      const diagnostics = await this.compilerDiagnostics(prepared, result.compilation, config);
       if (result.compilation.exitCode !== 0 || result.compilation.reason) {
-        report?.({ kind: "compile", output: result.compilation });
-        console.error("编译失败：\n" + result.compilation.stderr);
+        report?.({ kind: "compile", output: result.compilation, diagnostics });
+        console.error("编译失败：\n" + diagnosticText(diagnostics));
         return false;
       }
       const originals = new Map(cases.map(c => [c.id, c]));
@@ -574,14 +598,16 @@ export class StandaloneWorkflow {
           comparison: original.comparison };
       });
       const passed = samples.filter(entry => entry.status === "PASS").length;
-      report?.({ kind: "samples", cases: samples, passed, total: cases.length });
+      report?.({ kind: "samples", cases: samples, passed, total: cases.length, diagnostics });
+      if (diagnostics.length) console.log("编译诊断：\n" + diagnosticText(diagnostics));
       for (const [i, entry] of samples.entries()) {
         console.log((i + 1) + ". " + entry.name + " : " + entry.status);
         if (entry.status === "FAIL") {
           console.log("  预期：" + (entry.diff?.expected ?? "(无)"));
           console.log("  实际：" + (entry.diff?.actual ?? "(无)"));
-        } else if (entry.stderr) {
-          console.log("  stderr：" + entry.stderr.slice(0, 500));
+        }
+        if (entry.stderr) {
+          console.log("  stderr：\n" + entry.stderr);
         }
       }
       const allPass = passed === cases.length;
@@ -626,7 +652,7 @@ export class StandaloneWorkflow {
     // A direct editor submit is a user action, not merely an OJ status refresh.
     await this.state.rememberProblem(resolved.root, resolved.binding.bindingId,
       account, { sourceFile: resolved.source });
-    let prepared: { source: string; code: string };
+    let prepared: { source: string; code: string; diagnosticCode?: string };
     if (codeSnapshot === undefined) {
       prepared = await this.prepare(resolved);
     } else {
@@ -638,11 +664,14 @@ export class StandaloneWorkflow {
         throw new Error("测试后源码发生修改，请重新测试。");
       prepared = { source: resolved.source, code: codeSnapshot };
     }
-    const checked = codeSnapshot === undefined ? await compile(prepared.source, prepared.code,
-      await this.configuredToolchain(), undefined, false, path.dirname(resolved.source)) : undefined;
+    const config = codeSnapshot === undefined ? await this.configuredToolchain() : undefined;
+    const checked = config ? await compile(prepared.source, prepared.code,
+      config, undefined, false, path.dirname(resolved.source)) : undefined;
     if (checked) try {
+      const diagnostics = await this.compilerDiagnostics(prepared, checked.result, config!);
       if (checked.result.exitCode !== 0 || checked.result.reason)
-        throw new Error("提交前编译失败，未上传：\n" + checked.result.stderr);
+        throw new Error("提交前编译失败，未上传：\n" + diagnosticText(diagnostics));
+      if (diagnostics.length) console.log("编译诊断：\n" + diagnosticText(diagnostics));
     } finally {
       await fs.rm(checked.directory, { recursive: true, force: true });
     }
