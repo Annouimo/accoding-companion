@@ -83,7 +83,7 @@ interface ObservationRequest {
 function Screen({ app, resume, onObserve }: { app: StandaloneWorkflow; resume?: ResumeState; onObserve: (request: ObservationRequest) => void }) {
   const { exit } = useApp();
   const { rows: height } = useWindowSize();
-  const [state, setState] = useState<ApplicationState>(resume?.state);
+  const [state, setState] = useState<ApplicationState | undefined>(resume?.state);
   const [problems, setProblems] = useState<ResolvedProblem[]>(resume?.problems ?? []);
   const [page, setPage] = useState<Page>(resume?.page ?? {});
   const [panel, setPanel] = useState<Panel>();
@@ -93,7 +93,7 @@ function Screen({ app, resume, onObserve }: { app: StandaloneWorkflow; resume?: 
   const [busy, setBusy] = useState("正在打开工作区…");
   const [message, setMessage] = useState(resume?.message ?? "");
   const [testResult, setTestResult] = useState<Record<string, SampleTestReport>>(resume?.testResult ?? {});
-  const [details, setDetails] = useState<SampleTestReport>(resume?.details);
+  const [details, setDetails] = useState<SampleTestReport | undefined>(resume?.details);
   const [manual, setManual] = useState<{ version: string; markdown: string; reference?: ReturnType<typeof parseReference>; file?: string }>();
   const manualViews = useRef(new Map<string, ReferenceView>());
   const [loginResume, setLoginResume] = useState<{ after?: () => void }>();
@@ -538,8 +538,8 @@ function Screen({ app, resume, onObserve }: { app: StandaloneWorkflow; resume?: 
       loginResume.after?.();
     }} />;
   if (details) return <SampleOutput report={details} onBack={() => {setDetails(undefined);setMessage("");}}
-    initial={details === resume?.details ? resume.sampleView : undefined}
-    observationError={details === resume?.details ? resume.message : undefined}
+    initial={details === resume?.details ? resume?.sampleView : undefined}
+    observationError={details === resume?.details ? resume?.message : undefined}
     onObserve={problem && path.extname(problem.source).toLowerCase() === ".c" ?
       (entry, sampleView) => requestObservation({caseId:entry.id, revision:entry.revision}, sampleView) : undefined} />;
   return (

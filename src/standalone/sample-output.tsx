@@ -209,8 +209,8 @@ export function SampleOutput({ report, onBack, initial, onObserve, observationEr
   const horizontalStep = Math.max(1, contentWidth - 2);
   const first = differences[0] ?? 0;
   const anchor = position.anchor ?? first;
-  const initial = table ? Math.max(0, first - Math.min(2, height - 1)) : 0;
-  const start = Math.min(position.top ?? initial, maxTop);
+  const initialTop = table ? Math.max(0, first - Math.min(2, height - 1)) : 0;
+  const start = Math.min(position.top ?? initialTop, maxTop);
   const end = Math.min(start + height, total);
   const offsetFor = (index: number) => {
     const pair = rowParts(expected, actual, index);
