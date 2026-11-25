@@ -54,3 +54,5 @@ Ink 界面保持挂载，页面状态与面包屑共享课程、作业和题目�
 - Linux：`$XDG_DATA_HOME/accoding-companion/presets/<version>` 或 `~/.local/share/accoding-companion/presets/<version>`
 
 敏感账户数据不随工作区发布，也不放在 npm 包中。
+
+测试详情优先按位置比较等长输出；不等长输出采用有界字符对齐。诊断上下文来自编译输入快照，已知警告默认折叠原文，未知诊断直接显示原文。顶部状态、视图导航与底部操作栏固定；终端过窄时简化标签与操作说明。
