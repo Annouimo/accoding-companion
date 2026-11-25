@@ -18,6 +18,19 @@ function parts(chars: string[], changed: boolean[]): DiffPart[] {
 }
 export function lineDiff(expected: string, actual: string): [DiffPart[], DiffPart[]] {
   if (expected === actual) return [[{text: expected, changed: false}], [{text: actual, changed: false}]];
+  // Avoid splitting multi-megabyte lines into millions of graphemes.
+  // Preserve common prefix/suffix at code point boundaries on very long lines.
+  if (expected.length + actual.length > 16000) {
+    let p = 0, a = expected.length, b = actual.length;
+    while (p < a && p < b && expected[p] === actual[p]) p++;
+    if (p && /[\uD800-\uDBFF]/.test(expected[p-1])) p--;
+    while (a > p && b > p && expected[a-1] === actual[b-1]) { a--; b--; }
+    if (a < expected.length && /[\uDC00-\uDFFF]/.test(expected[a])) { a++; b++; }
+    const split = (s: string, end: number): DiffPart[] =>
+      [{text:s.slice(0,p),changed:false},{text:s.slice(p,end),changed:true},
+        {text:s.slice(end),changed:false}].filter(part => part.text.length > 0);
+    return [split(expected,a),split(actual,b)];
+  }
   // Avoid allocating a dynamic-programming matrix for giant lines.
   const a = graphemes(expected), b = graphemes(actual);
   const x = a.map(() => true), y = b.map(() => true);
