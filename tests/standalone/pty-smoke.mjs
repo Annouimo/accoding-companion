@@ -140,6 +140,10 @@ await scenario("sample table starts at the difference and scrolls within a 16-ro
   await ctx.expect("显示 12–21 / 30");
   ctx.send("]");
   await ctx.expect("通过 · 2/2");
+  ctx.send("\t"); await ctx.expect("警告 1/1"); await ctx.expect("未被使用");
+  ctx.send("\t"); await ctx.expect("stderr（不参与答案比较）"); await ctx.expect("trace sample");
+  ctx.send("\t"); await ctx.expect("通过 · 2/2");
+  ctx.send("["); await ctx.expect("显示 12–21 / 30");
   ctx.send("\x1b");
   await ctx.expect("本地样例 1/2 通过");
   ctx.send("q");
@@ -170,7 +174,7 @@ import { stripVTControlCharacters } from "node:util";
     });
     const binding = await workspace.read("problem-123");
     await fs.writeFile(path.join(root, binding.sourceFile),
-      "#include <stdio.h>\\nint main(void) { fputs(" + JSON.stringify(output) + ", stdout); }\\n");
+      "#include <stdio.h>\\nint main(void) { int unused_index = 0; fputs(" + JSON.stringify(output) + ", stdout); fputs(\\"trace sample\\", stderr); }\\n");
     const state = new StateStore();
     await state.rememberWorkspace(root);
     const saved = await state.load();
