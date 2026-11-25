@@ -4,6 +4,8 @@ import stringWidth from "string-width";
 import { normalizeOutput } from "../judge/judge";
 import type { Comparison } from "../model";
 import type { SampleCaseReport, SampleTestReport } from "./workflow";
+import { parseCompilerDiagnostics, warningCount } from "./compiler-diagnostics";
+import { lineDiff, type DiffPart } from "./line-diff";
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -63,86 +65,196 @@ function outputCell(lines: string[], index: number) {
     "〈空行〉";
 }
 
+type View = "sample" | "diagnostic" | "log";
+type Position = { top?: number; offset?: number; anchor?: number; raw?: boolean };
+
+function visiblePart(part: DiffPart): DiffPart {
+  return { ...part, text: terminalText(part.text.replace(/\n/g, "↵"))
+    .replace(/ /g, part.changed ? "·" : " ") };
+}
+function clippedParts(parts: DiffPart[], width: number, offset: number): DiffPart[] {
+  let position = 0, used = 0;
+  const result: DiffPart[] = [];
+  let clipped = false;
+  outer: for (const part of parts) {
+    for (const {segment} of segmenter.segment(part.text)) {
+      const cells = stringWidth(segment);
+      const start = position; position += cells;
+      if (start < offset) continue;
+      if (used + cells > width) { clipped = true; break outer; }
+      const last = result[result.length - 1];
+      if (last && last.changed === part.changed) last.text += segment;
+      else result.push({text: segment, changed: part.changed});
+      used += cells;
+    }
+  }
+  if (clipped && used < width) result.push({ text: "…", changed: false });
+  if (used < width - (clipped && used < width ? 1 : 0))
+    result.push({text: " ".repeat(width - used - (clipped && used < width ? 1 : 0)), changed: false});
+  return result;
+}
+function rowParts(a: string[], b: string[], index: number): [DiffPart[], DiffPart[]] {
+  if (index >= a.length || index >= b.length)
+    return [[{text: outputCell(a, index), changed: true}], [{text: outputCell(b, index), changed: true}]];
+  if (a[index] === b[index])
+    return [[{text: outputCell(a, index), changed: false}], [{text: outputCell(b, index), changed: false}]];
+  const [left, right] = lineDiff(a[index], b[index]);
+  return [left.length ? left.map(visiblePart) : [{text: "〈空行〉", changed: true}],
+    right.length ? right.map(visiblePart) : [{text: "〈空行〉", changed: true}]];
+}
+function changeColumn(parts: DiffPart[]) {
+  let width = 0;
+  for (const p of parts) {
+    if (p.changed) return width;
+    width += stringWidth(p.text);
+  }
+  return Infinity;
+}
+function wrapText(text: string, width: number) {
+  const lines: string[] = [];
+  for (const source of text.split(/\r?\n/)) {
+    let line = "", used = 0;
+    for (const {segment} of segmenter.segment(terminalText(source))) {
+      const size = stringWidth(segment);
+      if (used && used + size > width) { lines.push(line); line = ""; used = 0; }
+      line += segment; used += size;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
 export function SampleOutput({ report, onBack }: { report: SampleTestReport; onBack: () => void }) {
   const cases = report.kind === "samples" ? report.cases : [];
+  const diagnostics = report.diagnostics ?? (report.kind === "compile" ? parseCompilerDiagnostics(report.output) : []);
   const firstFailure = cases.findIndex(entry => entry.status !== "PASS");
   const [selected, setSelected] = useState(Math.max(0, firstFailure));
+  const [diagnosticIndex, setDiagnosticIndex] = useState(0);
+  const hasLogs = cases.some(c => c.stderr || !["PASS", "FAIL"].includes(c.status));
+  const views: View[] = [
+    ...(cases.length ? ["sample" as const] : []),
+    ...(diagnostics.length ? ["diagnostic" as const] : []),
+    ...(hasLogs ? ["log" as const] : [])
+  ];
+  const [view, setView] = useState<View>(report.kind === "compile" ? "diagnostic" :
+    firstFailure >= 0 && !["PASS", "FAIL"].includes(cases[firstFailure].status) ? "log" : "sample");
+  const [positions, setPositions] = useState<Record<string, Position>>({});
+  const keyName = view + ":" + (view === "diagnostic" ? diagnosticIndex : selected);
+  const position = positions[keyName] ?? {};
+  const update = (patch: Position) => setPositions(old => ({...old, [keyName]: {...old[keyName], ...patch}}));
   const entry = cases[selected];
-  const table = entry?.expected !== undefined && ["FAIL", "PASS"].includes(entry.status);
+  const diagnostic = diagnostics[diagnosticIndex];
+  const { rows, columns } = useWindowSize();
+  const height = Math.max(1, (rows || 24) - 6);
+  const width = Math.max(1, (columns || 80) - 2);
   const expected = useMemo(() => entry?.expected === undefined ? [] :
     outputLines(entry.expected, entry.comparison), [entry]);
   const actual = useMemo(() => entry ? outputLines(entry.stdout, entry.comparison) : [], [entry]);
-  const difference = useMemo(() => {
-    const total = Math.max(expected.length, actual.length);
-    for (let index = 0; index < total; index++) {
-      if (expected[index] !== actual[index]) return index;
-    }
-    return -1;
+  const differences = useMemo(() => {
+    const result: number[] = [];
+    for (let i = 0; i < Math.max(expected.length, actual.length); i++)
+      if (expected[i] !== actual[i]) result.push(i);
+    return result;
   }, [expected, actual]);
-
-  const diagnostic = report.kind === "compile" ? report.output.stderr || report.output.stdout ||
-    (report.output.reason === "TIMEOUT" ? "编译超时" : "编译器退出，未提供诊断。")
-    : entry?.stderr || (entry?.status === "UNCHECKED" ? entry.stdout : "");
-  const messages = useMemo(() => diagnostic ? diagnostic.trimEnd().split(/\r?\n/) : [], [diagnostic]);
-  const { rows, columns } = useWindowSize();
-  const height = Math.max(1, (rows || 24) - 5);
-  const width = Math.max(1, (columns || 80) - 2);
+  const table = view === "sample" && entry?.expected !== undefined;
+  const raw = position.raw ?? true;
+  const messages = useMemo(() => {
+    if (view === "diagnostic" && diagnostic) {
+      return [
+        ...wrapText(diagnostic.message, width),
+        ...(diagnostic.explanation ? ["", ...wrapText(diagnostic.explanation, width)] : []),
+        ...(raw || !diagnostic.explanation ? ["", "编译器原文：", ...diagnostic.raw.split(/\r?\n/)] : [])
+      ];
+    }
+    if (!entry) return ["无可用结果"];
+    if (view === "log") return [
+      outcome(entry) + " · " + entry.elapsedMs + " ms",
+      "退出码：" + (entry.exitCode ?? "—") + " · 信号：" + (entry.signal ?? "—"),
+      "", "stderr（不参与答案比较）：",
+      ...(entry.stderr ? entry.stderr.split(/\r?\n/) : ["〈无〉"]),
+      ...(!["PASS", "FAIL"].includes(entry.status) ? ["", "已产生的 stdout：",
+        ...(entry.stdout ? entry.stdout.split(/\r?\n/) : ["〈无〉"])] : [])
+    ];
+    return ["实际输出（无预期答案）：", ...entry.stdout.split(/\r?\n/)];
+  }, [view, diagnostic, entry, raw, width]);
   const total = table ? Math.max(expected.length, actual.length) : messages.length;
   const maxTop = Math.max(0, total - height);
-  const [top, setTop] = useState<number>();
-  const [offset, setOffset] = useState(0);
-  const initial = table ? Math.max(0, difference - Math.min(2, height - 1)) : 0;
-  const start = Math.min(top ?? initial, maxTop);
-  const end = Math.min(start + height, total);
   const digits = Math.max(2, String(total).length);
   const left = Math.max(1, Math.floor((width - digits - 6) / 2));
   const right = Math.max(1, width - digits - 6 - left);
   const contentWidth = table ? Math.min(left, right) : width;
   const horizontalStep = Math.max(1, contentWidth - 2);
-
+  const first = differences[0] ?? 0;
+  const anchor = position.anchor ?? first;
+  const initial = table ? Math.max(0, first - Math.min(2, height - 1)) : 0;
+  const start = Math.min(position.top ?? initial, maxTop);
+  const end = Math.min(start + height, total);
+  const offsetFor = (index: number) => {
+    const pair = rowParts(expected, actual, index);
+    const col = Math.min(changeColumn(pair[0]), changeColumn(pair[1]));
+    return Number.isFinite(col) ? Math.max(0, col - Math.floor(contentWidth / 2)) : 0;
+  };
+  const offset = position.offset ?? (table && differences.length ? offsetFor(first) : 0);
   useInput((char, key) => {
     if (key.escape || (key.ctrl && char === "c")) { onBack(); return; }
+    if (key.tab && views.length) {
+      setView(views[(views.indexOf(view) + views.length + (key.shift ? -1 : 1)) % views.length]);
+      return;
+    }
     if (char === "[" || char === "]") {
-      const next = Math.min(cases.length - 1, Math.max(0, selected + (char === "]" ? 1 : -1)));
-      if (next >= 0 && next !== selected) {
-        setSelected(next);
-        setTop(undefined);
-        setOffset(0);
-      }
+      const delta = char === "]" ? 1 : -1;
+      if (view === "diagnostic")
+        setDiagnosticIndex(i => Math.max(0, Math.min(diagnostics.length - 1, i + delta)));
+      else setSelected(i => Math.max(0, Math.min(cases.length - 1, i + delta)));
+      return;
+    }
+    if (key.return && view === "diagnostic" && diagnostic?.explanation) {
+      update({raw: !raw, top: 0, offset: 0}); return;
+    }
+    if (table && ["n", "p"].includes(char.toLowerCase())) {
+      const next = char.toLowerCase() === "n" ? differences.find(i => i > anchor) :
+        [...differences].reverse().find(i => i < anchor);
+      if (next !== undefined)
+        update({anchor: next, top: Math.max(0, next - Math.min(2, height - 1)), offset: offsetFor(next)});
       return;
     }
     if (key.rightArrow) {
-      const hasMore = (s: string, w: number) => stringWidth(s) > offset + w;
-      for (let index = start; index < end; index++) {
-        if (table ? (index < expected.length && hasMore(outputCell(expected, index), left)) ||
-                    (index < actual.length && hasMore(outputCell(actual, index), right))
-                  : hasMore(terminalText(messages[index]), width)) {
-          setOffset(offset + horizontalStep);
-          break;
+      for (let i = start; i < end; i++) {
+        if (table ? stringWidth(outputCell(expected, i)) > offset + left ||
+                    stringWidth(outputCell(actual, i)) > offset + right
+                  : stringWidth(terminalText(messages[i])) > offset + width) {
+          update({offset: offset + horizontalStep}); break;
         }
       }
-    } else if (key.leftArrow) setOffset(Math.max(0, offset - horizontalStep));
+    } else if (key.leftArrow) update({offset: Math.max(0, offset - horizontalStep)});
+    else if (key.home || key.end) update({top: key.home ? 0 : maxTop});
     else if (key.upArrow || key.downArrow || key.pageUp || key.pageDown) {
       const step = key.pageUp || key.pageDown ? height : 1;
       const direction = key.upArrow || key.pageUp ? -1 : 1;
-      setTop(Math.max(0, Math.min(maxTop, start + step * direction)));
+      update({top: Math.max(0, Math.min(maxTop, start + step * direction))});
     }
   });
-
-  const heading = report.kind === "compile" ? "编译失败" : entry
-    ? entry.name + " · " + outcome(entry) + " · " + (selected + 1) + "/" + cases.length +
-      (table ? " · 预期 " + expected.length + (entry.comparison === "tokens" ? " 项" : " 行") +
-        "，实际 " + actual.length + (entry.comparison === "tokens" ? " 项" : " 行") : "")
-    : "样例未运行";
-  const range = total ? "显示 " + (start + 1) + "–" + end + " / " + total : "";
-  const footer = "Esc 返回 · ↑↓ 滚动 · ←→ 长行" + (cases.length > 1 ? " · [ ] 样例" : "") +
-    (range ? " · " + range : "");
+  const heading = report.kind === "compile" ? "编译失败" :
+    "编译成功 · 本地样例 " + report.passed + "/" + report.total + " 通过";
+  const tabs = views.map(v => {
+    const label = v === "sample" ? "样例对比" : v === "log" ? "运行日志" :
+      "编译诊断 (" + diagnostics.length + ")";
+    return v === view ? "[" + label + "]" : label;
+  }).join("  ");
+  const subheading = view === "diagnostic" && diagnostic ?
+    (diagnostic.severity === "error" ? "错误" : diagnostic.severity === "warning" ? "警告" : "信息") +
+    " " + (diagnosticIndex + 1) + "/" + diagnostics.length + " · " + (diagnostic.location ?? "编译器") :
+    entry ? entry.name + " · " + outcome(entry) + " · " + (selected + 1) + "/" + cases.length +
+      (table ? " · " + differences.length + (entry.comparison === "tokens" ? " 项" : " 行") + "差异" : "") : "";
+  const range = total ? "显示 " + (start + 1) + "–" + end + "/" + total : "";
+  const footer = "Esc 返回 · Tab 视图 · ↑↓ 滚动 · ←→ 长行 · [ ] 切换" +
+    (table ? " · N/P 差异" : view === "diagnostic" && diagnostic?.explanation ? " · Enter 原文" : "");
   const numberTitle = entry?.comparison === "tokens" ? "序号" : "行号";
   const padCell = (text: string, cells: number) => text + " ".repeat(Math.max(0, cells - stringWidth(text)));
-
   return <Box flexDirection="column" paddingX={1}>
-    <Text bold color={entry?.status === "PASS" ? "green" : entry?.status === "UNCHECKED" ? undefined : "red"}
-      wrap="truncate-end">{windowOf(terminalText(heading), width)}</Text>
+    <Text bold wrap="truncate-end">{windowOf(terminalText(heading), width)}{warningCount(diagnostics) ? <Text color="yellow"> · {warningCount(diagnostics)} 项警告</Text> : null}</Text>
+    <Text color="cyan" wrap="truncate-end">{windowOf(tabs, width)}</Text>
+    <Text dimColor wrap="truncate-end">{windowOf(terminalText(subheading), width)}</Text>
     {table ? <Text dimColor wrap="truncate-end">
       {padCell(numberTitle, digits + 2) + "  " +
         padCell(windowOf("样例输出", left), left) + "  " + windowOf("我的输出", right)}
@@ -152,14 +264,14 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
       if (!table) return <Text key={line} wrap="truncate-end">{windowOf(terminalText(messages[line]), width, offset) || " "}</Text>;
       const changed = expected[line] !== actual[line];
       const number = String(line + 1).padStart(digits);
-      const sample = windowOf(outputCell(expected, line), left, expected[line] ? offset : 0);
-      const output = windowOf(outputCell(actual, line), right, actual[line] ? offset : 0);
+      const pair = rowParts(expected, actual, line);
       return <Text key={line} wrap="truncate-end">
         <Text color={changed ? "red" : undefined} dimColor={!changed}>{(changed ? "! " : "  ") + number}</Text>
-        {"  " + padCell(sample, left) + "  "}
-        <Text color={changed ? "red" : undefined}>{output}</Text>
+        {"  "}{clippedParts(pair[0], left, offset).map((p,j) => <Text key={j} color={p.changed ? "red" : undefined}>{p.text}</Text>)}
+        {"  "}{clippedParts(pair[1], right, offset).map((p,j) => <Text key={j} color={p.changed ? "red" : undefined}>{p.text}</Text>)}
       </Text>;
     })}
+    <Text dimColor wrap="truncate-end">{windowOf(range + (offset ? " · 横向 " + (offset + 1) : ""), width)}</Text>
     <Text dimColor wrap="truncate-end">{windowOf(footer, width)}</Text>
   </Box>;
 }
