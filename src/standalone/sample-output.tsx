@@ -242,7 +242,7 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
       update({top: Math.max(0, Math.min(maxTop, start + step * direction))});
     }
   });
-  const heading = report.kind === "compile" ? "编译失败" :
+  const heading = report.kind === "compile" ? (report.output.exitCode === 0 && !report.output.reason ? "编译成功" : "编译失败") :
     "编译成功 · 本地样例 " + report.passed + "/" + report.total + " 通过";
   const tabs = views.map(v => {
     const label = v === "sample" ? "样例对比" : v === "log" ? "运行日志" :
