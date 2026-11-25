@@ -23,7 +23,7 @@ const explanations: Record<string, string> = {
 };
 
 function explanation(message: string) {
-  const option = /\[(-W[\w-]+)(?:=[^\]]+)?\]\s*$/.exec(message)?.[1];
+  const option = /\[(-W[\w-]+)(?:=[^\]]*)?\]\s*$/.exec(message)?.[1];
   return option ? explanations[option] : undefined;
 }
 
