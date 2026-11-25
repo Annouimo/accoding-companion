@@ -18,6 +18,15 @@ function parts(chars: string[], changed: boolean[]): DiffPart[] {
 }
 export function lineDiff(expected: string, actual: string): [DiffPart[], DiffPart[]] {
   if (expected === actual) return [[{text: expected, changed: false}], [{text: actual, changed: false}]];
+  // Equal-length student outputs are positional: a transposition is two changes.
+  // For very large lines retain the bounded prefix/suffix fallback.
+  if (expected.length + actual.length <= 16000) {
+    const a = graphemes(expected), b = graphemes(actual);
+    if (a.length === b.length) {
+      const changed = a.map((value, i) => value !== b[i]);
+      return [parts(a, changed), parts(b, changed)];
+    }
+  }
   // Avoid splitting multi-megabyte lines into millions of graphemes.
   // Preserve common prefix/suffix at code point boundaries on very long lines.
   if (expected.length + actual.length > 16000) {
