@@ -39,3 +39,7 @@
 ### 本地界面验收（无须安装 npm 依赖）
 
 PR 的 Verify native launcher and external compilers 工作流在 CLI 测试通过后保存 `verified-cli`（`dist/accoding.mjs`）。下载并解压对应提交的构建产物，使用 Node.js 运行；在临时离线工作区中分别检查通过、警告、编译失败、输出差异、日志、运行异常和长内容，调整终端至 120×30、80×24、40×12 检查导航。界面截图应来自实际终端，不能代替 Windows/macOS 实机验证。
+
+### 仅发布 Companion（0.2.7）
+
+资源格式未变，不发布 C Exam Kit。先在 main 以 `PUBLISH_LATEST`、`expected_version=0.2.7` 发布 CLI，确认 npm latest 已更新后查询 `npm view @annouimo/c-exam-kit-preset@latest version`，再以 `PUBLISH_LAUNCHERS`、`expected_version=0.2.7`、`expected_preset_version=<实际 latest>` 发布启动器。版本说明见 [0.2.7](releases/0.2.7.md)。继续使用人工触发，不改变发布授权机制。
