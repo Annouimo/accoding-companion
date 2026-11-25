@@ -6,7 +6,7 @@ import path from "node:path";
 import { compile } from "../../src/judge/judge";
 import { runProcess } from "../../src/judge/process";
 import { toolchain } from "../../src/standalone/workflow";
-import { parseCompilerDiagnostics, preferMappedDiagnostics } from "../../src/standalone/compiler-diagnostics";
+import { parseCompilerDiagnostics, preferMappedDiagnostics, attachDiagnosticContext } from "../../src/standalone/compiler-diagnostics";
 import { lineDiff } from "../../src/standalone/line-diff";
 
 test("missing compiler is reported only when compilation is requested", async () => {
@@ -89,8 +89,20 @@ test("comment-preserving #line diagnostics do not change formal source or hide w
 test("inline diff highlights only changed characters, including insertions and Unicode", () => {
   const changed = (a: string,b: string) => lineDiff(a,b).map(parts => parts.filter(p => p.changed).map(p=>p.text).join(""));
   assert.deepEqual(changed("David 85 91","David 83 91"),["5","3"]);
+  assert.deepEqual(changed("Bob 89 96","Bob 89 69"),["96","69"]);
   assert.deepEqual(changed("12345678","123678"),["45",""]);
   assert.deepEqual(changed("你好😀世界","你好😁世界"),["😀","😁"]);
   assert.deepEqual(changed("a b","a  b"),[""," "]);
   assert.deepEqual(changed("a".repeat(30000)+"X","a".repeat(30000)+"Y"),["X","Y"]);
+});
+
+test("mapped source contexts preserve comments and distinguish preset origins", () => {
+  const result = {stdout:"", stderr:"main.c:4:6: warning: unused variable 'index' [-Wunused-variable]\npreset/io.c:2:1: warning: unused variable 'x' [-Wunused-variable]", exitCode:0, signal:null, elapsedMs:1};
+  const source = '#line 1 "main.c"\n/* comment\n end */\n#line 1 "preset/io.c"\nint f(void) {\n int x;\n}\n#line 4 "main.c"\n int index;\n return 0;\n';
+  const diagnostics = attachDiagnosticContext(parseCompilerDiagnostics(result),source,"main.c",true);
+  assert.equal(diagnostics[0].title,"未使用的变量");
+  assert.equal(diagnostics[0].origin,"user");
+  assert.equal(diagnostics[0].context?.find(x=>x.focus)?.text," int index;");
+  assert.equal(diagnostics[1].origin,"preset");
+  assert.equal(diagnostics[1].context?.find(x=>x.focus)?.line,2);
 });
