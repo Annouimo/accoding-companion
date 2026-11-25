@@ -153,7 +153,7 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
   const entry = cases[selected];
   const diagnostic = diagnostics[diagnosticIndex];
   const { rows, columns } = useWindowSize();
-  const height = Math.max(1, (rows || 24) - 6);
+  const height = Math.max(1, (rows || 24) - 7);
   const width = Math.max(1, (columns || 80) - 2);
   const expected = useMemo(() => entry?.expected === undefined ? [] :
     outputLines(entry.expected, entry.comparison), [entry]);
@@ -164,14 +164,18 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
       if (expected[i] !== actual[i]) result.push(i);
     return result;
   }, [expected, actual]);
-  const table = view === "sample" && entry?.expected !== undefined;
-  const raw = position.raw ?? true;
+  const table = view === "sample" && entry?.expected !== undefined && ["PASS", "FAIL"].includes(entry.status);
+  const raw = position.raw ?? !diagnostic?.explanation;
   const messages = useMemo(() => {
     if (view === "diagnostic" && diagnostic) {
       return [
-        ...wrapText(diagnostic.message, width),
-        ...(diagnostic.explanation ? ["", ...wrapText(diagnostic.explanation, width)] : []),
-        ...(raw || !diagnostic.explanation ? ["", "编译器原文：", ...diagnostic.raw.split(/\r?\n/)] : [])
+        ...(diagnostic.title ? [...wrapText(diagnostic.title, width), ""] : []),
+        ...(diagnostic.context?.length ? [
+          ...diagnostic.context.map(c => (c.focus ? "› " : "  ") + String(c.line).padStart(4) + " │ " + c.text), ""
+        ] : []),
+        ...(diagnostic.explanation ? [...wrapText(diagnostic.explanation, width), "",
+          (raw ? "▼ " : "▶ ") + "编译器原文" + (diagnostic.option ? " · " + diagnostic.option : "")] : []),
+        ...(raw || !diagnostic.explanation ? diagnostic.raw.split(/\r?\n/) : [])
       ];
     }
     if (!entry) return ["无可用结果"];
@@ -183,7 +187,7 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
       ...(!["PASS", "FAIL"].includes(entry.status) ? ["", "已产生的 stdout：",
         ...(entry.stdout ? entry.stdout.split(/\r?\n/) : ["〈无〉"])] : [])
     ];
-    return ["实际输出（无预期答案）：", ...entry.stdout.split(/\r?\n/)];
+    return [entry.expected === undefined ? "实际输出（无预期答案）：" : "已产生的实际输出：", ...entry.stdout.split(/\r?\n/)];
   }, [view, diagnostic, entry, raw, width]);
   const total = table ? Math.max(expected.length, actual.length) : messages.length;
   const maxTop = Math.max(0, total - height);
@@ -242,34 +246,40 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
       update({top: Math.max(0, Math.min(maxTop, start + step * direction))});
     }
   });
-  const heading = report.kind === "compile" ? (report.output.exitCode === 0 && !report.output.reason ? "编译成功" : "编译失败") :
-    "编译成功 · 本地样例 " + report.passed + "/" + report.total + " 通过";
-  const tabs = views.map(v => {
-    const label = v === "sample" ? "样例对比" : v === "log" ? "运行日志" :
-      "编译诊断 (" + diagnostics.length + ")";
-    return v === view ? "[" + label + "]" : label;
-  }).join("  ");
   const subheading = view === "diagnostic" && diagnostic ?
     (diagnostic.severity === "error" ? "错误" : diagnostic.severity === "warning" ? "警告" : "信息") +
-    " " + (diagnosticIndex + 1) + "/" + diagnostics.length + " · " + (diagnostic.location ?? "编译器") :
+    " " + (diagnosticIndex + 1) + "/" + diagnostics.length + " · " + (diagnostic.location ?? "编译器") +
+    (diagnostic.origin === "preset" ? " · 组件" : diagnostic.origin === "generated" ? " · 展开源码" : "") :
     entry ? entry.name + " · " + outcome(entry) + " · " + (selected + 1) + "/" + cases.length +
       (table ? " · " + differences.length + (entry.comparison === "tokens" ? " 项" : " 行") + "差异" : "") : "";
   const range = total ? "显示 " + (start + 1) + "–" + end + " / " + total : "";
-  const footer = "Esc 返回 · Tab 视图 · ↑↓←→ 滚动 · [ ] 切换" +
+  const footer = "Esc 返回 · Tab 视图 · [ ] 切换 · ↑↓←→ 滚动" +
     (table ? " · N/P 差异" : view === "diagnostic" && diagnostic?.explanation ? " · Enter 原文" : "");
   const numberTitle = entry?.comparison === "tokens" ? "序号" : "行号";
   const padCell = (text: string, cells: number) => text + " ".repeat(Math.max(0, cells - stringWidth(text)));
-  return <Box flexDirection="column" paddingX={1}>
-    <Text bold wrap="truncate-end">{windowOf(terminalText(heading), width)}{warningCount(diagnostics) ? <Text color="yellow"> · {warningCount(diagnostics)} 项警告</Text> : null}</Text>
-    <Text color="cyan" wrap="truncate-end">{windowOf(tabs, width)}</Text>
+  const compact = width < 55;
+  const tabLabels: Record<View, string> = {sample:"样例对比",diagnostic:"编译诊断",log:"运行日志"};
+  const warningLabel = warningCount(diagnostics) ? " · " + warningCount(diagnostics) + " 项警告" : "";
+  const compileOk = report.kind === "samples" || (report.output.exitCode === 0 && !report.output.reason);
+  const sampleOk = report.kind === "samples" && report.passed === report.total;
+  return <Box flexDirection="column" paddingX={1} height={Math.max(1, rows || 24)}>
+    <Text bold wrap="truncate-end">
+      <Text color={compileOk ? "green" : "red"}>{compileOk ? "编译成功" : "编译失败"}</Text>
+      {report.kind === "samples" ? <Text color={sampleOk ? "green" : "red"}>{" · 本地样例 " + report.passed + "/" + report.total + " 通过"}</Text> : null}
+      <Text color="yellow">{warningLabel}</Text>
+    </Text>
+    <Text wrap="truncate-end">{compact ? "[" + tabLabels[view] + "] " + (views.indexOf(view)+1) + "/" + views.length + " · Tab 切换" :
+      views.map(v => <Text key={v} color={v===view?"cyan":undefined} dimColor={v!==view} bold={v===view}>{v===view?"[":""}{tabLabels[v]}{v==="diagnostic"?" ("+diagnostics.length+")":""}{v===view?"]":""}  </Text>)}</Text>
     <Text dimColor wrap="truncate-end">{windowOf(terminalText(subheading), width)}</Text>
+    <Text dimColor wrap="truncate-end">{"─".repeat(width)}</Text>
     {table ? <Text dimColor wrap="truncate-end">
       {padCell(numberTitle, digits + 2) + "  " +
         padCell(windowOf("样例输出", left), left) + "  " + windowOf("我的输出", right)}
     </Text> : null}
+    <Box flexDirection="column" flexGrow={1} flexShrink={0}>
     {Array.from({ length: end - start }, (_, i) => {
       const line = start + i;
-      if (!table) return <Text key={line} wrap="truncate-end">{windowOf(terminalText(messages[line]), width, offset) || " "}</Text>;
+      if (!table) return <Text key={line} color={view==="diagnostic" && (messages[line].startsWith("› ") || line===0 && diagnostic?.title) ? (diagnostic?.severity==="error"?"red":"yellow") : undefined} wrap="truncate-end">{windowOf(terminalText(messages[line]), width, offset) || " "}</Text>;
       const changed = expected[line] !== actual[line];
       const number = String(line + 1).padStart(digits);
       const pair = rowParts(expected, actual, line);
@@ -279,7 +289,9 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
         {"  "}{clippedParts(pair[1], right, offset).map((p,j) => <Text key={j} color={p.changed ? "red" : undefined}>{p.text}</Text>)}
       </Text>;
     })}
-    <Text dimColor wrap="truncate-end">{windowOf(range + (offset ? " · 横向 " + (offset + 1) : ""), width)}</Text>
-    <Text dimColor wrap="truncate-end">{windowOf(footer, width)}</Text>
+    </Box>
+    <Text dimColor wrap="truncate-end">{windowOf(range + (offset ? " · 横向 " + (offset + 1) : "") +
+      (table && differences.length ? " · 差异 " + (differences.indexOf(anchor)+1) + "/" + differences.length : ""), width)}</Text>
+    <Text dimColor wrap="truncate-end">{windowOf(compact ? "Esc 返回 Tab 视图 [] 切换 ↑↓←→" : footer, width)}</Text>
   </Box>;
 }
