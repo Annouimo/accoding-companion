@@ -298,3 +298,33 @@ await scenario("password form stays open until cancelled", async ctx => {
   ctx.send("\x1b");
   await ctx.expect("❯ 设置"); ctx.send("q");
 });
+
+await scenario("observer owns terminal and returns to selected sample", async ctx => {
+  await ctx.expect("❯ 运行样例");
+  ctx.send("\r");
+  await ctx.expect("输出不符");
+  await ctx.expect("O 观察当前源码");
+  ctx.send("o");
+  await ctx.expect("OBSERVER_CHILD_READY");
+  const sessionPath = (await fs.readFile(path.join(ctx.home,"observer-session"),"utf8")).trim();
+  const data = JSON.parse(await fs.readFile(sessionPath,"utf8"));
+  assert.equal(data.schemaVersion,1);
+  assert.equal(data.sourcePath,"observe.c");
+  assert.equal(data.stdinFile,"sample.in");
+  assert.ok(data.expectedStdoutFile);
+  assert.ok((await fs.readFile(path.join(path.dirname(sessionPath),data.visibleSourcePaths[0]),"utf8")).includes("unused_index"));
+  ctx.send("return\n");
+  await ctx.expect("OBSERVER_CHILD_EXIT");
+  await ctx.expect("输出不符");
+  await ctx.expect("O 观察当前源码");
+  await assert.rejects(fs.access(sessionPath));
+  ctx.send("\x1b");
+  await ctx.expect("❯ 运行样例");
+  ctx.send("q");
+}, env => {
+  prepareSampleCourse(env);
+  env.ACCODING_OBSERVER_PATH = path.join(env.HOME,"mock-observer");
+  execFileSync("sh",["-c","cat > \"$ACCODING_OBSERVER_PATH\"; chmod +x \"$ACCODING_OBSERVER_PATH\""],{
+    env,input: '#!/bin/sh\nif [ "$1" = "--capabilities" ]; then printf \'%s\\n\' \'{"sessionSchemaVersions":[1],"backends":["mock"]}\'; exit 0; fi\n[ "$1" = "--session" ] || exit 2\nprintf "%s\\n" "$2" > "$HOME/observer-session"\nprintf "OBSERVER_CHILD_READY\\n"\nIFS= read -r answer\n[ "$answer" = "return" ] || exit 3\nprintf "OBSERVER_CHILD_EXIT\\n"\n'
+  });
+},"rows 24 cols 100");
