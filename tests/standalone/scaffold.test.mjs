@@ -35,6 +35,9 @@ test("only referenced API and transitive dependencies are expanded", async () =>
   assert.doesNotMatch(gcd.code, /static unsigned long long exam_lcm_u64/);
   assert.doesNotMatch(gcd.code, /#include "exam.h"/);
   assert.doesNotMatch(gcd.code, /must not activate/);
+  assert.doesNotMatch(gcd.code, /#line/);
+  assert.match(gcd.diagnosticCode, /#line 3 "main\.c"/);
+  assert.match(gcd.diagnosticCode, /must not activate/);
   assert.match(gcd.code, /#include <stdio.h>/);
   const lcm = assembleC(
     '#include "exam.h"\nunsigned long long f(void) { return exam_lcm_u64(12, 18); }\n',
@@ -125,6 +128,7 @@ test("inline v2 snapshots preserve declaration selection and offline reference",
     const result = assembleC('#include "exam.h"\nint main(void) { return read_int(); }', snapshot);
     assert.deepEqual(result.components, ["helper", "read_int"]);
     assert.doesNotMatch(result.code, /strip library comment/);
+    assert.match(result.diagnosticCode, /strip library comment/);
     assert.deepEqual(assembleC('#include "exam.h"\nint main(void) { int helper = 0; return helper; }', snapshot)
       .components, []);
     await assert.rejects(fs.stat(path.join(saved.directory, "components")), { code: "ENOENT" });
