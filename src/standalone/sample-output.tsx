@@ -77,6 +77,14 @@ function clippedParts(parts: DiffPart[], width: number, offset: number): DiffPar
   const result: DiffPart[] = [];
   let clipped = false;
   outer: for (const part of parts) {
+    if (/^[\x20-\x7e]*$/.test(part.text)) {
+      const skip = Math.min(part.text.length, Math.max(0, offset - position));
+      const take = Math.min(part.text.length - skip, width - used);
+      if (take) result.push({text:part.text.slice(skip, skip + take), changed:part.changed});
+      used += take; position += part.text.length;
+      if (skip + take < part.text.length) { clipped = true; break; }
+      continue;
+    }
     for (const {segment} of segmenter.segment(part.text)) {
       const cells = stringWidth(segment);
       const start = position; position += cells;
@@ -105,7 +113,7 @@ function rowParts(a: string[], b: string[], index: number): [DiffPart[], DiffPar
 function changeColumn(parts: DiffPart[]) {
   let width = 0;
   for (const p of parts) {
-    if (p.changed) return width;
+    if (p.changed && p.text.length) return width;
     width += stringWidth(p.text);
   }
   return Infinity;
@@ -246,8 +254,8 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
     " " + (diagnosticIndex + 1) + "/" + diagnostics.length + " · " + (diagnostic.location ?? "编译器") :
     entry ? entry.name + " · " + outcome(entry) + " · " + (selected + 1) + "/" + cases.length +
       (table ? " · " + differences.length + (entry.comparison === "tokens" ? " 项" : " 行") + "差异" : "") : "";
-  const range = total ? "显示 " + (start + 1) + "–" + end + "/" + total : "";
-  const footer = "Esc 返回 · Tab 视图 · ↑↓ 滚动 · ←→ 长行 · [ ] 切换" +
+  const range = total ? "显示 " + (start + 1) + "–" + end + " / " + total : "";
+  const footer = "Esc 返回 · Tab 视图 · ↑↓←→ 滚动 · [ ] 切换" +
     (table ? " · N/P 差异" : view === "diagnostic" && diagnostic?.explanation ? " · Enter 原文" : "");
   const numberTitle = entry?.comparison === "tokens" ? "序号" : "行号";
   const padCell = (text: string, cells: number) => text + " ".repeat(Math.max(0, cells - stringWidth(text)));
