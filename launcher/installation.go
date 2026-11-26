@@ -13,8 +13,12 @@ import (
 	"time"
 )
 
-const cliPackage = "@annouimo/accoding-companion"
-const presetPackage = "@annouimo/c-exam-kit-preset"
+const cliPackage = "@routilet/accoding-companion"
+const presetPackage = "@routilet/c-exam-kit-preset"
+
+func legacyPackage(name string) string {
+	return strings.Replace(name, "@routilet/", "@annouimo/", 1)
+}
 
 var stableVersion = regexp.MustCompile("^[0-9]+\\.[0-9]+\\.[0-9]+$")
 
@@ -37,13 +41,42 @@ func versionOf(dir, name string) string {
 	return pkg.Version
 }
 
-func validInstallation(dir string) bool {
+func validScope(dir string, legacy bool) bool {
 	for name, file := range map[string]string{cliPackage: "dist/accoding.mjs", presetPackage: "preset/manifest.json"} {
+		if legacy {
+			name = legacyPackage(name)
+		}
 		if versionOf(dir, name) == "" || !isFile(filepath.Join(packagePath(dir, name), filepath.FromSlash(file))) {
 			return false
 		}
 	}
 	return true
+}
+
+func validInstallation(dir string) bool {
+	return validScope(dir, false) || validScope(dir, true)
+}
+
+func activePackage(dir, name string) string {
+	if !validScope(dir, false) && validScope(dir, true) {
+		return legacyPackage(name)
+	}
+	return name
+}
+
+func installedVersion(dir, name string) string {
+	return versionOf(dir, activePackage(dir, name))
+}
+
+func legacyInstallation(dir string) bool {
+	return dir != "" && !validScope(dir, false) && validScope(dir, true)
+}
+
+func canMigrate(dir string, available updateResult) bool {
+	return legacyInstallation(dir) && available.err == nil &&
+		stableVersion.MatchString(available.cli) && stableVersion.MatchString(available.preset) &&
+		!newerVersion(installedVersion(dir, cliPackage), available.cli) &&
+		!newerVersion(installedVersion(dir, presetPackage), available.preset)
 }
 
 func readInstallation(root string) string {
@@ -108,6 +141,10 @@ func install(root, installed string, available updateResult) (string, error) {
 	}
 	progress(2, "确认安装版本")
 	cli, preset := available.cli, available.preset
+	migrating := legacyInstallation(installed)
+	if migrating && !canMigrate(installed, available) {
+		return installed, fmt.Errorf("Routilet 新软件包暂不可用或版本较旧；原安装保留")
+	}
 	if installed == "" {
 		cli, err = r.latest(cliPackage)
 		if err != nil {
@@ -118,7 +155,7 @@ func install(root, installed string, available updateResult) (string, error) {
 			return "", err
 		}
 	} else {
-		installedCLI, installedPreset := versionOf(installed, cliPackage), versionOf(installed, presetPackage)
+		installedCLI, installedPreset := installedVersion(installed, cliPackage), installedVersion(installed, presetPackage)
 		if !newerVersion(cli, installedCLI) {
 			cli = installedCLI
 		}
@@ -128,12 +165,16 @@ func install(root, installed string, available updateResult) (string, error) {
 	}
 	if installed != "" {
 		fmt.Printf("Companion %s → %s\n资源包 %s → %s\n",
-			versionOf(installed, cliPackage), cli, versionOf(installed, presetPackage), preset)
-		if versionOf(installed, cliPackage) == cli && versionOf(installed, presetPackage) == preset {
+			installedVersion(installed, cliPackage), cli, installedVersion(installed, presetPackage), preset)
+		if !migrating && installedVersion(installed, cliPackage) == cli && installedVersion(installed, presetPackage) == preset {
 			pause("已是当前发布版本。")
 			return installed, nil
 		}
-		if !confirm("安装上述更新？") {
+		message := "安装上述更新？"
+		if migrating {
+			message = "迁移到 Routilet 新发行包？原安装与课程文件保留。"
+		}
+		if !confirm(message) {
 			return installed, nil
 		}
 	}
@@ -160,7 +201,7 @@ func install(root, installed string, available updateResult) (string, error) {
 		return "", fmt.Errorf("安装 npm 包：%w", err)
 	}
 	progress(4, "验证安装文件")
-	if !validInstallation(stage) || versionOf(stage, cliPackage) != cli || versionOf(stage, presetPackage) != preset {
+	if !validScope(stage, false) || versionOf(stage, cliPackage) != cli || versionOf(stage, presetPackage) != preset {
 		return "", fmt.Errorf("下载的包缺少文件或版本不匹配")
 	}
 	check := exec.Command(r.node, filepath.Join(packagePath(stage, cliPackage), "dist", "accoding.mjs"), "--version")

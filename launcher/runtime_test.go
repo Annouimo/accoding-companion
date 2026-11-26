@@ -58,3 +58,35 @@ func TestInstalledMenuOnlyShowsAvailableActions(t *testing.T) {
 	}
 }
 
+
+func TestLegacyScopeMigration(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "packages", "release-old")
+	for name, file := range map[string]string{cliPackage: "dist/accoding.mjs", presetPackage: "preset/manifest.json"} {
+		old := legacyPackage(name)
+		base := packagePath(dir, old)
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(base, filepath.FromSlash(file))), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(base, "package.json"), []byte(`{"name":"`+old+`","version":"1.2.3"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(base, filepath.FromSlash(file)), []byte("fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "current"), []byte("release-old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if readInstallation(root) != dir || !legacyInstallation(dir) || installedVersion(dir, cliPackage) != "1.2.3" || activePackage(dir, presetPackage) != legacyPackage(presetPackage) {
+		t.Fatal("legacy pair must remain usable offline")
+	}
+	for _, release := range []updateResult{{}, {cli: "1.2.4", preset: "1.2.2"}} {
+		if len(availableUpdates(dir, release)) != 0 {
+			t.Fatal("must not offer incomplete or downgrading migration")
+		}
+	}
+	if len(availableUpdates(dir, updateResult{cli: "1.2.3", preset: "1.2.3"})) != 1 {
+		t.Fatal("same-version namespace migration must be offered")
+	}
+}
