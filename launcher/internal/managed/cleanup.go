@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 func leasePath(dir, release string) string {
@@ -68,7 +70,7 @@ func (m Manager) AcquireCurrent(ctx context.Context) (string, Info, func(), erro
 }
 
 // Cleanup retains current and previous. Skip any release with a live process
-// lease. Do not touch stage directories: an uncommitted plan may still own one.
+// lease. Stages are only removed when old and no live candidate owns them.
 func (m Manager) Cleanup() (int, error) {
 	dir, err := m.dir()
 	if err != nil {
@@ -93,7 +95,15 @@ func (m Manager) Cleanup() (int, error) {
 	removed := 0
 	for _, e := range entries {
 		name := e.Name()
-		if !e.IsDir() || !releasePattern.MatchString(name) || name == s.Current || name == s.Previous {
+		if !e.IsDir() || name == s.Current || name == s.Previous {
+			continue
+		}
+		if strings.HasPrefix(name, ".stage-") && releasePattern.MatchString("release-"+strings.TrimPrefix(name, ".stage-")) {
+			info, err := e.Info()
+			if err != nil || time.Since(info.ModTime()) < 24*time.Hour {
+				continue
+			}
+		} else if !releasePattern.MatchString(name) {
 			continue
 		}
 		free, err := lockPath(leasePath(dir, name), true)

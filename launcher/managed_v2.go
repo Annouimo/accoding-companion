@@ -260,11 +260,17 @@ func runV2() error {
 		r, nodeErr := findNode(root)
 		m := v2Manager(root, s.Channel, r)
 		info, infoErr := m.InstalledInfo()
-		if infoErr != nil {
-			return fmt.Errorf("无法读取安装状态：%w", infoErr)
+		active, activeErr := m.State()
+		if activeErr != nil {
+			return fmt.Errorf("安装记录损坏，已保留原文件：%w", activeErr)
 		}
 		legacy := readInstallation(root)
-		hasApp := info.Version != "" || (s.Channel == "latest" && legacy != "")
+		damaged := infoErr != nil
+		if damaged {
+			info = managed.Info{}
+			note = "当前安装未通过检查；可尝试重新安装，或在设置中回退。"
+		}
+		hasApp := !damaged && (info.Version != "" || (s.Channel == "latest" && legacy != ""))
 		if !hasApp {
 			marker := filepath.Join(root, "guide-opened")
 			if _, err := os.Stat(marker); os.IsNotExist(err) {
@@ -281,7 +287,7 @@ func runV2() error {
 			options = append(options, v2Option{"update", "安装"})
 		}
 		options = append(options, v2Option{"guide", "使用说明"}, v2Option{"settings", "设置"})
-		if info.Version != "" {
+		if active.Current != "" {
 			options = append(options, v2Option{"uninstall", "卸载当前渠道"})
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -295,7 +301,17 @@ func runV2() error {
 				if version != info.Version {
 					return v2Check("发行渠道版本：" + version + " · 可在更新中查看完整依赖变化。")
 				}
-				return v2Check("主程序版本一致，选择更新可检查兼容依赖。")
+				dir, err := m.Current()
+				if err == nil && dir != "" {
+					changed, err := managedRunner(root, r).Outdated(ctx, dir)
+					if err == nil && changed {
+						return v2Check("发现兼容依赖更新，选择更新查看完整变动。")
+					}
+					if err != nil {
+						return v2Check("主程序版本一致，暂未完成依赖检查。")
+					}
+				}
+				return v2Check("主程序版本一致，选择更新可重新解析兼容依赖。")
 			}
 		}
 		choice, err := chooseV2(v2Menu{

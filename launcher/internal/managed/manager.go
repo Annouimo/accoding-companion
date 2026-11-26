@@ -58,6 +58,7 @@ type Manager struct {
 type Candidate struct {
 	manager Manager
 	stage   string
+	free    func()
 	base    Activation
 	digest  [32]byte
 	version string
@@ -205,24 +206,30 @@ func (m Manager) Plan(ctx context.Context, version string) (*Candidate, error) {
 	if err != nil {
 		return nil, err
 	}
+	free, err := lockPath(leasePath(dir, filepath.Base(stage)), false)
+	if err != nil {
+		_ = os.RemoveAll(stage)
+		return nil, err
+	}
 	keep := false
 	defer func() {
 		if !keep {
 			_ = os.RemoveAll(stage)
+			free()
 		}
 	}()
 	var previous lockFile
 	if base.Current != "" {
 		old := filepath.Join(dir, "releases", base.Current)
-		raw, err := os.ReadFile(filepath.Join(old, "package-lock.json"))
-		if err != nil {
-			return nil, err
-		}
-		if err = json.Unmarshal(raw, &previous); err != nil {
-			return nil, err
-		}
-		if err = os.WriteFile(filepath.Join(stage, "package-lock.json"), raw, 0600); err != nil {
-			return nil, err
+		// Missing or unreadable prior lock should not prevent an explicit
+		// repair. Re-resolve from scratch and show the full candidate tree.
+		raw, readErr := os.ReadFile(filepath.Join(old, "package-lock.json"))
+		if readErr == nil && json.Unmarshal(raw, &previous) == nil && previous.LockfileVersion >= 2 && len(previous.Packages) != 0 {
+			if err = os.WriteFile(filepath.Join(stage, "package-lock.json"), raw, 0600); err != nil {
+				return nil, err
+			}
+		} else {
+			previous = lockFile{}
 		}
 	}
 	pkg := map[string]any{"name": "accoding-managed-app", "private": true, "dependencies": map[string]string{App: version}}
@@ -240,15 +247,22 @@ func (m Manager) Plan(ctx context.Context, version string) (*Candidate, error) {
 		return nil, err
 	}
 	keep = true
-	return &Candidate{manager: m, stage: stage, base: base, digest: sha256.Sum256(raw), version: version, Changes: differences(previous, next)}, nil
+	return &Candidate{manager: m, stage: stage, free: free, base: base, digest: sha256.Sum256(raw), version: version, Changes: differences(previous, next)}, nil
 }
 func (c *Candidate) Close() error {
-	if c == nil || c.stage == "" {
+	if c == nil {
 		return nil
 	}
-	err := os.RemoveAll(c.stage)
-	if err == nil {
-		c.stage = ""
+	var err error
+	if c.stage != "" {
+		err = os.RemoveAll(c.stage)
+		if err == nil {
+			c.stage = ""
+		}
+	}
+	if c.free != nil {
+		c.free()
+		c.free = nil
 	}
 	return err
 }
@@ -356,6 +370,10 @@ func (c *Candidate) Commit(ctx context.Context) (Info, error) {
 		return info, err
 	}
 	c.stage = ""
+	if c.free != nil {
+		c.free()
+		c.free = nil
+	}
 	if err = writeState(dir, Activation{schema, name, now.Current}); err != nil {
 		_ = os.RemoveAll(destination)
 		return info, err

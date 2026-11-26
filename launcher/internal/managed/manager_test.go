@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type fakeRunner struct {
@@ -213,5 +214,71 @@ func TestRunningReleaseRetainedAndUninstallProtected(t *testing.T) {
 	}
 	if s, _ := preview.State(); s.Current == "" {
 		t.Fatal("uninstall removed preview")
+	}
+}
+
+func TestStageLeaseAndRepair(t *testing.T) {
+	ctx := context.Background()
+	r := &fakeRunner{version: "0.2.8", dep: "0.6.9"}
+	m := Manager{t.TempDir(), "latest", r}
+	c, err := m.Plan(ctx, r.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	dir, _ := m.dir()
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(c.stage, old, old); err != nil {
+		t.Fatal(err)
+	}
+	orphan := filepath.Join(dir, "releases", ".stage-orphan")
+	if err := os.Mkdir(orphan, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(orphan, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := m.Cleanup(); removed != 1 || err != nil {
+		t.Fatalf("cleanup stage: %d %v", removed, err)
+	}
+	if _, err := c.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := m.Current()
+	if err := os.Remove(filepath.Join(current, "package-lock.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.VerifyCurrent(ctx); err == nil {
+		t.Fatal("damaged install verified")
+	}
+	repair, err := m.Plan(ctx, r.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repair.Close()
+	if len(repair.Changes) == 0 {
+		t.Fatal("repair did not resolve new lock")
+	}
+	if _, err := repair.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOutdatedHints(t *testing.T) {
+	for _, test := range []struct {
+		raw  string
+		want bool
+	}{
+		{`{}`, false},
+		{`{"resource":{"current":"0.6.9","wanted":"0.6.9","latest":"0.7.0"}}`, false},
+		{`{"resource":{"current":"0.6.9","wanted":"0.6.10","latest":"0.7.0"}}`, true},
+		{`{"resource":[{"current":"0.6.9","wanted":"0.6.10"}]}`, true},
+	} {
+		if got, err := hasWantedUpdate([]byte(test.raw)); err != nil || got != test.want {
+			t.Fatalf("%s: got %v %v", test.raw, got, err)
+		}
+	}
+	if _, err := hasWantedUpdate([]byte(`{"error":{"code":"E404"}}`)); err == nil {
+		t.Fatal("npm error treated as success")
 	}
 }

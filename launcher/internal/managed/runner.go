@@ -2,6 +2,8 @@ package managed
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -38,4 +40,50 @@ func (r ProcessRunner) run(ctx context.Context, dir string, timeout time.Duratio
 		return nil, err
 	}
 	return output, nil
+}
+
+// Outdated is a best-effort background hint, not an approved dependency plan.
+// npm returns status 1 for ordinary outdated packages as well as some errors.
+func (r ProcessRunner) Outdated(ctx context.Context, dir string) (bool, error) {
+	args := []string{r.NPMEntry, "outdated", "--all", "--json", "--prefer-online", "--ignore-scripts", "--no-audit", "--no-fund", "--fetch-retries=0", "--fetch-timeout=4000"}
+	if r.Cache != "" {
+		args = append(args, "--cache", r.Cache)
+	}
+	cmd := exec.CommandContext(ctx, r.Node, args...)
+	cmd.Dir = dir
+	raw, err := cmd.Output()
+	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 || ctx.Err() != nil {
+			return false, err
+		}
+	}
+	return hasWantedUpdate(raw)
+}
+
+func hasWantedUpdate(raw []byte) (bool, error) {
+	var data map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return false, err
+	}
+	if data == nil || data["error"] != nil {
+		return false, errors.New("npm outdated did not return dependency information")
+	}
+	type row struct{ Current, Wanted string }
+	for _, value := range data {
+		var rows []row
+		if err := json.Unmarshal(value, &rows); err != nil {
+			var one row
+			if err = json.Unmarshal(value, &one); err != nil {
+				continue
+			}
+			rows = []row{one}
+		}
+		for _, item := range rows {
+			if item.Current != "" && item.Wanted != "" && item.Current != item.Wanted {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
