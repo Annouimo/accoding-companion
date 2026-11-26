@@ -3,22 +3,27 @@ name: Publish npm stable release
 on:
   push:
     branches: [main]
-    paths: ['package.json', '.github/workflows/publish-npm.yml']
+    paths: ['package.json', 'launcher/VERSION', '.github/workflows/publish-npm.yml', '.github/scripts/*release*.mjs']
+  pull_request:
+    branches: [main]
+    paths: ['package.json', 'launcher/VERSION', '.github/workflows/publish-npm.yml', '.github/scripts/*release*.mjs']
   workflow_dispatch:
     inputs:
       mode:
-        description: "DRY_RUN builds only (also prepares a tarball for first manual publish); PUBLISH_LATEST publishes the CLI; PUBLISH_LAUNCHERS publishes the ZIPs"
+        description: "AUTO publishes new declared versions in dependency order; DRY_RUN builds only; PUBLISH_LATEST retries CLI; PUBLISH_LAUNCHERS retries ZIPs"
         type: choice
         required: true
-        default: DRY_RUN
+        default: AUTO
         options:
+          - AUTO
           - DRY_RUN
           - PUBLISH_LATEST
           - PUBLISH_LAUNCHERS
       expected_version:
-        description: "Must exactly match the checked-out stable package.json"
+        description: "Optional assertion of the declared stable package.json version"
         type: string
-        required: true
+        required: false
+        default: ''
 
       expected_preset_version:
         description: "Published C Exam Kit version required for a launcher release"
@@ -29,17 +34,46 @@ on:
         description: "Published Observer stable version required for this release"
         type: string
         required: false
-        default: "0.1.0"
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: npm-latest-publish
+  group: npm-latest-publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.select.outputs.version }}
+      launcher_version: ${{ steps.select.outputs.launcher_version }}
+      mode: ${{ steps.select.outputs.mode }}
+      publish: ${{ steps.select.outputs.publish }}
+      launcher: ${{ steps.select.outputs.launcher }}
+      preset: ${{ steps.select.outputs.preset }}
+      observer: ${{ steps.select.outputs.observer }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test .github/scripts/*release*.test.mjs
+      - name: Select declared release versions
+        id: select
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_PRESET: ${{ inputs.expected_preset_version }}
+          EXPECTED_OBSERVER: ${{ inputs.expected_observer_version }}
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/companion-release-plan.mjs
   pack:
+    needs: plan
+    if: needs.plan.outputs.mode == 'DRY_RUN' || needs.plan.outputs.publish == 'true' || needs.plan.outputs.launcher == 'true'
     name: Build and validate Accoding Companion CLI
     runs-on: ubuntu-latest
     permissions:
@@ -54,28 +88,19 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Verify the intended source branch and stable version
         env:
-          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/main"
           node - <<'NODE'
           const fs=require("node:fs");
           const file="package.json";
           const pkg=JSON.parse(fs.readFileSync(file,"utf8"));
           if(pkg.name!=="@routilet/accoding-companion") throw Error("Unexpected package name");
           if(pkg.repository?.url!=="git+https://github.com/Routilet/accoding-companion.git") throw Error("GitHub provenance repository mismatch");
-          if((process.env.GITHUB_EVENT_NAME==="workflow_dispatch" && pkg.version!==process.env.EXPECTED_VERSION) || !/^\d+\.\d+\.\d+$/.test(pkg.version)) throw Error("Expected version mismatch or not a stable version");
+          if(pkg.version!==process.env.EXPECTED_VERSION || !/^\d+\.\d+\.\d+$/.test(pkg.version)) throw Error("Expected version mismatch or not a stable version");
           delete pkg.private; // Only the runner copy becomes publishable.
           fs.writeFileSync(file,JSON.stringify(pkg,null,2)+"\n");
           NODE
-      - name: Confirm stable Observer exists before publication
-        if: github.event_name == 'workflow_dispatch' && inputs.mode != 'DRY_RUN'
-        env:
-          EXPECTED_OBSERVER: ${{ inputs.expected_observer_version }}
-        run: |
-          set -euo pipefail
-          test -n "$EXPECTED_OBSERVER"
-          test "$(npm view @routilet/c-observer@latest version)" = "$EXPECTED_OBSERVER"
       - name: Build, test, and pack
         run: |
           set -euo pipefail
@@ -87,10 +112,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/npm-dist"
           npm pack --pack-destination "$RUNNER_TEMP/npm-dist"
       - name: Verify the actual stable tarball before publication
-        if: github.event_name == 'workflow_dispatch' && inputs.mode != 'DRY_RUN'
+        if: needs.plan.outputs.publish == 'true' || needs.plan.outputs.launcher == 'true'
         env:
-          EXPECTED_VERSION: ${{ inputs.expected_version }}
-          EXPECTED_OBSERVER: ${{ inputs.expected_observer_version }}
+          EXPECTED_VERSION: ${{ needs.plan.outputs.version }}
+          EXPECTED_OBSERVER: ${{ needs.plan.outputs.observer }}
+          EXPECTED_PRESET: ${{ needs.plan.outputs.preset }}
         run: |
           set -euo pipefail
           files=("$RUNNER_TEMP"/npm-dist/*.tgz)
@@ -99,7 +125,7 @@ jobs:
           cli="$RUNNER_TEMP/stable-install/node_modules/@routilet/accoding-companion/dist/accoding.mjs"
           test "$(node "$cli" --version)" = "$EXPECTED_VERSION"
           node "$cli" --installation-info > "$RUNNER_TEMP/installation-info.json"
-          node -e 'const x=require(process.argv[1]); const c=x.components.find(c=>c.package==="@routilet/c-observer"); if(!x.ready||x.version!==process.env.EXPECTED_VERSION||c?.status!=="ready"||c.version!==process.env.EXPECTED_OBSERVER) throw Error(JSON.stringify(x))' "$RUNNER_TEMP/installation-info.json"
+          node -e 'const x=require(process.argv[1]); const c=x.components.find(c=>c.package==="@routilet/c-observer"); const p=x.components.find(c=>c.package==="@routilet/c-exam-kit"); if(!x.ready||x.version!==process.env.EXPECTED_VERSION||c?.status!=="ready"||c.version!==process.env.EXPECTED_OBSERVER||p?.status!=="ready"||p.version!==process.env.EXPECTED_PRESET) throw Error(JSON.stringify(x))' "$RUNNER_TEMP/installation-info.json"
       - uses: actions/upload-artifact@v4
         with:
           name: npm-release-tarball
@@ -108,6 +134,8 @@ jobs:
           retention-days: 7
 
   launcher:
+    needs: plan
+    if: needs.plan.outputs.mode == 'DRY_RUN' || needs.plan.outputs.publish == 'true' || needs.plan.outputs.launcher == 'true'
     name: Verify launcher (${{ matrix.os }})
     strategy:
       matrix:
@@ -129,30 +157,37 @@ jobs:
         working-directory: launcher
         env:
           ACCODING_TEST_NODE_DOWNLOAD: "1"
-          ACCODING_TEST_PUBLISHED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'PUBLISH_LAUNCHERS' && inputs.expected_version || '' }}
-          ACCODING_TEST_PUBLISHED_OBSERVER: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'PUBLISH_LAUNCHERS' && inputs.expected_observer_version || '' }}
         run: go test -v ./...
 
   publish:
     name: Publish Accoding Companion CLI to npm latest
-    needs: [pack, launcher, launcher-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'PUBLISH_LATEST' }}
+    needs: [plan, pack, launcher, launcher-bundles]
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
       - name: Ensure OIDC compatible npm CLI
         run: npm install --global "npm@^11.21.0"
+      - name: Recheck registry before publishing
+        id: registry
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: node .github/scripts/npm-release-state.mjs @routilet/accoding-companion "$VERSION"
       - uses: actions/download-artifact@v4
         with:
           name: npm-release-tarball
           path: ./release
       - name: Publish stable package with npm OIDC
+        if: steps.registry.outputs.publish == 'true'
         run: |
           set -euo pipefail
           tarball="$(find release -type f -name '*.tgz' -print -quit)"
@@ -161,6 +196,8 @@ jobs:
           npm publish "$(realpath "$tarball")" --tag latest --access public
 
   launcher-bundles:
+    needs: plan
+    if: needs.plan.outputs.mode == 'DRY_RUN' || needs.plan.outputs.publish == 'true' || needs.plan.outputs.launcher == 'true'
     name: Package native launchers and offline guide
     runs-on: ubuntu-latest
     permissions:
@@ -184,10 +221,50 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  launcher-public-install:
+    name: Install actual published packages (${{ matrix.os }})
+    needs: [plan, pack, launcher, launcher-bundles, publish]
+    if: always() && !cancelled() && github.ref == 'refs/heads/main' && needs.plan.result == 'success' && needs.plan.outputs.launcher == 'true' && needs.pack.result == 'success' && needs.launcher.result == 'success' && needs.launcher-bundles.result == 'success' && (needs.publish.result == 'success' || (needs.plan.outputs.publish == 'false' && needs.publish.result == 'skipped'))
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: launcher/go.mod
+          cache-dependency-path: launcher/go.sum
+      - name: Wait for registry visibility and verify selected versions
+        shell: bash
+        env:
+          EXPECTED_CLI: ${{ needs.plan.outputs.version }}
+          EXPECTED_PRESET: ${{ needs.plan.outputs.preset }}
+          EXPECTED_OBSERVER: ${{ needs.plan.outputs.observer }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..20}; do
+            if [[ "$(npm view @routilet/accoding-companion@latest version --fetch-retries=0 --fetch-timeout=15000)" == "$EXPECTED_CLI" && "$(npm view @routilet/c-exam-kit@latest version --fetch-retries=0 --fetch-timeout=15000)" == "$EXPECTED_PRESET" && "$(npm view @routilet/c-observer@latest version --fetch-retries=0 --fetch-timeout=15000)" == "$EXPECTED_OBSERVER" ]]; then exit 0; fi
+            sleep 15
+          done
+          echo "Registry has not exposed the expected release versions" >&2
+          exit 1
+      - name: Verify real Go launcher installation from public npm
+        working-directory: launcher
+        env:
+          ACCODING_TEST_NODE_DOWNLOAD: '1'
+          ACCODING_TEST_PUBLISHED_VERSION: ${{ needs.plan.outputs.version }}
+          ACCODING_TEST_PUBLISHED_OBSERVER: ${{ needs.plan.outputs.observer }}
+        run: go test -count=1 -v -run '^TestManagedRuntimeFromChinesePath$' .
   launcher-release:
     name: Publish double-click launcher ZIPs
-    needs: [pack, launcher, launcher-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'PUBLISH_LAUNCHERS' }}
+    needs: [plan, launcher-public-install]
+    if: always() && !cancelled() && github.ref == 'refs/heads/main' && needs.plan.result == 'success' && needs.plan.outputs.launcher == 'true' && needs.launcher-public-install.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -195,38 +272,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - name: Verify all npm packages before publishing launchers
-        env:
-          EXPECTED_CLI: ${{ inputs.expected_version }}
-          EXPECTED_PRESET: ${{ inputs.expected_preset_version }}
-          EXPECTED_OBSERVER: ${{ inputs.expected_observer_version }}
-        run: |
-          set -euo pipefail
-          test "$(npm view @routilet/accoding-companion@latest version)" = "$EXPECTED_CLI"
-          test -n "$EXPECTED_PRESET"
-          test "$(npm view @routilet/c-exam-kit@latest version)" = "$EXPECTED_PRESET"
-          test -n "$EXPECTED_OBSERVER"
-          test "$(npm view @routilet/c-observer@latest version)" = "$EXPECTED_OBSERVER"
-          [[ "$(cat launcher/VERSION)" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
       - uses: actions/download-artifact@v4
         with:
           name: native-launchers
           path: ./launcher-dist
-      - name: Attach native launchers and guide to the GitHub release
+      - name: Publish independent Launcher release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          LAUNCHER_VERSION: ${{ needs.plan.outputs.launcher_version }}
         run: |
           set -euo pipefail
-          version="$(node -p 'require("./package.json").version')"
-          notes="docs/releases/$version.md"
-          if [[ -f "$notes" ]]; then
-            gh release create "v$version" launcher-dist/*.zip \
-              --target "$GITHUB_SHA" --title "Accoding Companion $version" --notes-file "$notes"
-          else
-            gh release create "v$version" launcher-dist/*.zip \
-              --target "$GITHUB_SHA" --title "Accoding Companion $version" \
-              --notes "Download the ZIP for your operating system and architecture and extract all files. Open Accoding Launcher.exe on Windows or Accoding Launcher.command on macOS. The package includes an offline HTML guide."
-          fi
+          tag="launcher-v$LAUNCHER_VERSION"
+          for platform in darwin-amd64 darwin-arm64 windows-amd64 windows-arm64; do
+            test -s "launcher-dist/accoding-launcher-$LAUNCHER_VERSION-$platform.zip"
+          done
+          existing="$(git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$tag")"
+          if [[ -n "$existing" ]]; then echo "Launcher tag already exists; inspect rather than overwrite" >&2; exit 1; fi
+          gh release create "$tag" launcher-dist/*.zip --target "$GITHUB_SHA" --latest \
+            --title "Accoding Launcher $LAUNCHER_VERSION" --notes "Launcher $LAUNCHER_VERSION for Accoding Companion $VERSION. Download and extract the ZIP for your operating system and architecture. Includes an offline HTML guide."
