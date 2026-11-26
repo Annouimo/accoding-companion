@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { configDirectory } from "./state";
+import { configDirectory, previewProfile } from "./state";
 
 interface SecretStorage {
   get(key: string): Promise<string | undefined>;
@@ -9,7 +9,7 @@ interface SecretStorage {
   delete(key: string): Promise<void>;
 }
 
-const SERVICE = "Annouimo.AccodingTUI";
+function service(): string { return previewProfile() ? "Annouimo.AccodingTUI.Preview" : "Annouimo.AccodingTUI"; }
 const VALID_KEY = /^[a-z][a-z0-9.]*$/;
 
 function validKey(key: string): string {
@@ -37,7 +37,7 @@ async function command(
 class MacKeychain implements SecretStorage {
   async get(key: string): Promise<string | undefined> {
     const result = await command("security", [
-      "find-generic-password", "-a", validKey(key), "-s", SERVICE, "-w"
+      "find-generic-password", "-a", validKey(key), "-s", service(), "-w"
     ]);
     if (result.status !== 0) {
       if (/could not be found|The specified item could not be found/i.test(result.stderr))
@@ -51,14 +51,14 @@ class MacKeychain implements SecretStorage {
     // avoid writing it to app logs and do not include it in thrown errors.
     const encoded = Buffer.from(value, "utf8").toString("base64");
     const result = await command("security", [
-      "add-generic-password", "-a", validKey(key), "-s", SERVICE,
+      "add-generic-password", "-a", validKey(key), "-s", service(),
       "-U", "-w", encoded
     ]);
     if (result.status !== 0) throw new Error("Unable to store macOS Keychain credential.");
   }
   async delete(key: string): Promise<void> {
     const result = await command("security", [
-      "delete-generic-password", "-a", validKey(key), "-s", SERVICE
+      "delete-generic-password", "-a", validKey(key), "-s", service()
     ]);
     if (result.status !== 0 &&
         !/could not be found|The specified item could not be found/i.test(result.stderr))
