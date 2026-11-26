@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -162,10 +164,29 @@ func installNode(root string) (nodeRuntime, error) {
 	if err := os.RemoveAll(destination); err != nil {
 		return nodeRuntime{}, err
 	}
-	if err := os.Rename(bin, destination); err != nil {
-		return nodeRuntime{}, err
+	if err := retryRuntimeRename(func() error { return os.Rename(bin, destination) }, time.Sleep, runtime.GOOS == "windows"); err != nil {
+		// Another installer may have completed while our directory was staged.
+		if ready := runtimeAt(destination); ready.valid() {
+			return ready, nil
+		}
+		return nodeRuntime{}, fmt.Errorf("无法启用 Node.js 运行环境（请关闭占用安装目录的程序后重试）：%w", err)
 	}
 	return runtimeAt(destination), nil
+}
+
+// Windows may temporarily refuse to move newly extracted executables (for
+// example while an antivirus scanner holds a handle). Retry only the specific
+// filesystem errors, with a finite delay; never overwrite the destination.
+func retryRuntimeRename(rename func() error, sleep func(time.Duration), windows bool) error {
+	const attempts = 8
+	for i := 0; ; i++ {
+		err := rename()
+		if err == nil || !windows || i == attempts-1 ||
+			!(errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.Errno(32)) || errors.Is(err, syscall.Errno(33))) {
+			return err
+		}
+		sleep(time.Duration(min(100*(1<<i), 1000)) * time.Millisecond)
+	}
 }
 
 func downloadNode(file, name, digest string) error {
