@@ -25,6 +25,11 @@ on:
         type: string
         required: false
         default: ""
+      expected_observer_version:
+        description: "Published Observer stable version required for this release"
+        type: string
+        required: false
+        default: "0.1.0"
 
 permissions:
   contents: read
@@ -63,6 +68,14 @@ jobs:
           delete pkg.private; // Only the runner copy becomes publishable.
           fs.writeFileSync(file,JSON.stringify(pkg,null,2)+"\n");
           NODE
+      - name: Confirm stable Observer exists before publication
+        if: github.event_name == 'workflow_dispatch' && inputs.mode != 'DRY_RUN'
+        env:
+          EXPECTED_OBSERVER: ${{ inputs.expected_observer_version }}
+        run: |
+          set -euo pipefail
+          test -n "$EXPECTED_OBSERVER"
+          test "$(npm view @routilet/c-observer@latest version)" = "$EXPECTED_OBSERVER"
       - name: Build, test, and pack
         run: |
           set -euo pipefail
@@ -73,6 +86,20 @@ jobs:
           node tests/standalone/pty-smoke.mjs dist/accoding.mjs
           mkdir -p "$RUNNER_TEMP/npm-dist"
           npm pack --pack-destination "$RUNNER_TEMP/npm-dist"
+      - name: Verify the actual stable tarball before publication
+        if: github.event_name == 'workflow_dispatch' && inputs.mode != 'DRY_RUN'
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_OBSERVER: ${{ inputs.expected_observer_version }}
+        run: |
+          set -euo pipefail
+          files=("$RUNNER_TEMP"/npm-dist/*.tgz)
+          test "${#files[@]}" = 1
+          npm install --prefix "$RUNNER_TEMP/stable-install" --ignore-scripts --no-audit --no-fund "${files[0]}"
+          cli="$RUNNER_TEMP/stable-install/node_modules/@routilet/accoding-companion/dist/accoding.mjs"
+          test "$(node "$cli" --version)" = "$EXPECTED_VERSION"
+          node "$cli" --installation-info > "$RUNNER_TEMP/installation-info.json"
+          node -e 'const x=require(process.argv[1]); const c=x.components.find(c=>c.package==="@routilet/c-observer"); if(!x.ready||x.version!==process.env.EXPECTED_VERSION||c?.status!=="ready"||c.version!==process.env.EXPECTED_OBSERVER) throw Error(JSON.stringify(x))' "$RUNNER_TEMP/installation-info.json"
       - uses: actions/upload-artifact@v4
         with:
           name: npm-release-tarball
@@ -102,6 +129,8 @@ jobs:
         working-directory: launcher
         env:
           ACCODING_TEST_NODE_DOWNLOAD: "1"
+          ACCODING_TEST_PUBLISHED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'PUBLISH_LAUNCHERS' && inputs.expected_version || '' }}
+          ACCODING_TEST_PUBLISHED_OBSERVER: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'PUBLISH_LAUNCHERS' && inputs.expected_observer_version || '' }}
         run: go test -v ./...
 
   publish:
@@ -147,7 +176,7 @@ jobs:
         with:
           go-version-file: launcher/go.mod
           cache-dependency-path: launcher/go.sum
-      - run: bash scripts/package-launchers.sh "$RUNNER_TEMP/launcher-dist"
+      - run: bash scripts/package-launchers.sh "$RUNNER_TEMP/launcher-dist" --managed-v2
       - uses: actions/upload-artifact@v4
         with:
           name: native-launchers
@@ -169,15 +198,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - name: Verify both npm packages before publishing launchers
+      - name: Verify all npm packages before publishing launchers
         env:
           EXPECTED_CLI: ${{ inputs.expected_version }}
           EXPECTED_PRESET: ${{ inputs.expected_preset_version }}
+          EXPECTED_OBSERVER: ${{ inputs.expected_observer_version }}
         run: |
           set -euo pipefail
           test "$(npm view @routilet/accoding-companion@latest version)" = "$EXPECTED_CLI"
           test -n "$EXPECTED_PRESET"
           test "$(npm view @routilet/c-exam-kit@latest version)" = "$EXPECTED_PRESET"
+          test -n "$EXPECTED_OBSERVER"
+          test "$(npm view @routilet/c-observer@latest version)" = "$EXPECTED_OBSERVER"
+          [[ "$(cat launcher/VERSION)" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
       - uses: actions/download-artifact@v4
         with:
           name: native-launchers
