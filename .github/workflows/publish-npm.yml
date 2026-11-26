@@ -40,7 +40,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: npm-latest-publish
+  group: npm-latest-publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -289,5 +289,5 @@ jobs:
           done
           existing="$(git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$tag")"
           if [[ -n "$existing" ]]; then echo "Launcher tag already exists; inspect rather than overwrite" >&2; exit 1; fi
-          gh release create "$tag" launcher-dist/*.zip --target "$GITHUB_SHA" \
+          gh release create "$tag" launcher-dist/*.zip --target "$GITHUB_SHA" --latest \
             --title "Accoding Launcher $LAUNCHER_VERSION" --notes "Launcher $LAUNCHER_VERSION for Accoding Companion $VERSION. Download and extract the ZIP for your operating system and architecture. Includes an offline HTML guide."
