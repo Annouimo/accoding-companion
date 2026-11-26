@@ -39,3 +39,7 @@ accoding --installation-info 在构造业务对象之前执行，无网络、无
 补充：后台通过 npm outdated --all --json 的 wanted/current 提示可能的兼容更新，实际确认仍以完整锁文件为准；超时不阻塞启动。候选 stage 持租约，超过 24h 且无租约的残留目录可在安全清理时删除。缺失旧锁文件可显式重新解析修复，不先删除旧安装。回退和卸载仍不改课程。
 
 新版整体候选已改为实际暂存安装再确认；旧的 lock-only/npm ci 说明仅为历史方案。实际组件状态在确认页面展示，确认后不再重新解析依赖。
+
+## 正式发行决定（最新）
+
+Launcher 0.3.0 通过 --managed-v2 打包为默认入口，配套 Companion 0.2.8 与 Observer 0.1.0。仍保留旧安装启动路径。实际安装使用 staged npm install/update，不采用旧 npm ci 方案。安装状态校验不可跳过；旧 Companion 缺少 --installation-info 时明确报版本和命令。运行环境有效性包含 npm --version，三平台 CI 新增真实 npm 本地 registry 的安装/更新/回退及不兼容版本拒绝；发布 ZIP 前从实际公开 registry 验证配套版本。用户将使用正常正式 npm 流程做实机验收。
