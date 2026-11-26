@@ -1,55 +1,31 @@
 # Accoding Companion 发布与验收
 
-主程序和 C Exam Kit 资源包独立维护、独立发布。日常提交与 PR 验证不发布 npm 或 GitHub Release；正式发布通过人工触发 GitHub Actions 完成。源码中的 `private: true` 保留为防误发布措施，发布工作流只修改 runner 中的临时副本。
+## 本轮正式发行
 
-## 发行物
+维护者确认先发行正式版，再使用正常 npm 安装流程开展体验微调。保留人工触发、Trusted Publishing/OIDC、发布前阻断性回归测试，不为普通 PR 自动发布。源码保留 private:true；工作流仅在 runner 临时副本移除。
 
-- `@routilet/accoding-companion`：Node.js 22.12+ 的单文件 CLI，构建期依赖打入 JS 文件。
-- `@routilet/c-exam-kit`：独立仓库维护的纯数据包。0.6.7 起使用内联组件的 `preset/manifest.json` 和 `preset/reference.json`；旧工作区的 v1 资源与 Markdown 手册仍受支持。
-- GitHub Release：Windows x64/ARM64、macOS x64/ARM64 原生启动器 ZIP，随包附离线 HTML 使用说明和独立编译环境配置指引。启动器只负责 Node.js 和两个 npm 软件包，不安装或检查编译器。
+| 组件 | 版本 | 分发 |
+|---|---|---|
+| C Exam Kit | 0.6.10（已有，不重发） | @routilet/c-exam-kit |
+| C Observer | 0.1.0 | @routilet/c-observer |
+| Accoding Companion | 0.2.8 | @routilet/accoding-companion |
+| Accoding Launcher v2 | 0.3.0 | GitHub Release 的四平台 ZIP |
 
-主程序和资源包分别维护版本号。仅更新函数时不必提升 Companion 版本，但改变资源格式时必须先发布兼容的 Companion。用户从启动器检查更新；TUI 不自动修改课程资源。
+Companion 通过 ^0.6.10 和可选 ^0.1.0 声明资源包、观察器的兼容范围；后续兼容补丁由统一更新解析，确认实际版本与锁文件差异后启用。C Observer 缺失或平台不支持时不影响普通评测。Node.js 22.12+；不自动安装编译器、调试器或修改 PATH。
 
-## 发布前验收
+## 顺序
 
-- CLI：`npm run typecheck`、`npm test`、`npm run build`、真实 TTY smoke test。
-- 启动器：macOS、Windows、Linux 上的 Go 测试与 launcher smoke test。Node.js 安装覆盖中文目录。单独使用外部 GCC 验证含中文和空格的工作区中 C/C++ 编译、链接、运行，以及缺少编译器时的提示；不要求启动器下载 GCC。
-- ZIP：四个平台/架构均成功构建，包含对应原生启动器、版本匹配的 HTML、独立编译环境配置指引和图片、许可文件。
-- 诊断与测试详情：验证成功编译的警告、原始源码行号（包括多行注释）、字符级差异高亮、长行滚动、视图切换、stderr 与输出比较分离；警告不阻止提交，诊断源码不得上传。
-- 工作区：测试和 OJ 提交复用同一份精简后的源码；已改动或无法判断状态的题目不自动升级。旧数据迁移只复制，冲突不覆盖。
-- 实机：macOS Apple Silicon、Windows 11、中文终端、首次安装、重复运行、独立升级、断网启动、卸载、真实 Accoding 登录与提交。自动化测试不能代替账号实测。
-- 安全：凭据、目录符号链接、外部路径、写事务、中断恢复；诊断日志及发行包不含账号、密码或 Cookie。
+1. 在 Observer 主分支人工触发 publish-npm.yml：PUBLISH_LATEST、version=0.1.0，确认 npm latest 已实际可安装。
+2. 确认 Companion 发行候选 CI 通过，合入 main。人工触发 [Publish npm stable release](https://github.com/Routilet/accoding-companion/actions/workflows/publish-npm.yml)：PUBLISH_LATEST、expected_version=0.2.8、expected_observer_version=0.1.0。验证真实安装的 tarball、--installation-info 和 Observer 组件状态。
+3. 确认 npm latest 为 0.2.8。再选择 PUBLISH_LAUNCHERS、expected_version=0.2.8、expected_preset_version=0.6.10、expected_observer_version=0.1.0。三平台使用实际下载的 Node/npm 及 Go v2 Manager 从公开 registry 安装并验证；全部成功后才创建 v0.2.8 Release 并附 Launcher 0.3.0 四平台 ZIP（Windows x64/ARM64、macOS x64/ARM64）。
+4. 维护者下载正常发行物进行 Mac/Windows 首次安装、启动、课程评测、程序观察、断网启动及更新。确认没有阻断问题，再针对使用体验安排小版本更新。
 
-## 正式发布顺序
+已发布的版本不得覆盖。npm 权限失败由维护者检查 Trusted Publisher 设置：owner Routilet，repo accoding-companion，workflow publish-npm.yml，Environment 留空。无需长期 token。
 
-涉及新资源格式时，以 0.2.6 / 0.6.9 为例：
+## 验收边界
 
-1. 确认目标提交已合入 main，所有必要回归测试通过。HTML 定稿必须经过用户认可。
-2. 在 Companion 的 [Publish npm stable release](https://github.com/Routilet/accoding-companion/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.2.6`。如只检查构建则使用 `DRY_RUN`。
-3. 验证 `npm view @routilet/accoding-companion@latest version` 已返回 0.2.6。
-4. 在 C Exam Kit 的 [Publish npm stable release](https://github.com/Routilet/c-exam-kit/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.6.9`。
-5. 验证 `npm view @routilet/c-exam-kit@latest version` 已返回 0.6.9。npm 的版本验证未完成时不要抢先发布启动器。
-6. 回到 Companion 发布工作流选择 main、`PUBLISH_LAUNCHERS`、`expected_version=0.2.6`、`expected_preset_version=0.6.9`。工作流将核对两个 npm latest 版本后创建 GitHub Release 并上传四个 ZIP。
-7. 检查下载入口与版本号，解压后做实际首次安装和启动验收。
+CLI 类型检查、单元测试、真实 TTY smoke；Go 启动器三平台测试、中文路径的 Node/npm 下载、真实 npm 本地 fixture registry 安装及旧 CLI 协议拒绝、更新与回退；发行 ZIP 的真实公开 registry 安装门槛；Windows 外部 GCC 回归；四平台构建及许可、HTML 检查。CI 不代替真实登录、提交或原生终端视觉审核。保护旧安装、工作区、历史资源、凭据；失败不得激活暂存版本。旧 scope 历史发行保留。
 
-仅更新资源内容且不改变格式时，可单独发布资源包。已有原生启动器可直接更新两个 npm 包；ZIP 内的使用说明是独立文件，需重新下载新版 ZIP 才会同步更新。不要为失败的构建或未发布的修复增加版本号；如果版本已经发布到 npm，则不能覆盖该版本。
+旧版启动器已安装软件可离线启动；v2 的新安装需要支持 --installation-info 的 Companion。0.2.7 不支持该接口，不能通过 v2 校验。不要删除旧安装或绕过校验。现有错误已补充具体命令及版本，运行环境有效性实际检查 npm --version。
 
-正式 npm 发布使用 Trusted Publishing/OIDC；不在源码或工作流中保存长期 npm 令牌。
-
-### 本地界面验收（无须安装 npm 依赖）
-
-PR 的 Verify native launcher and external compilers 工作流在 CLI 测试通过后保存 `verified-cli`（`dist/accoding.mjs`）。下载并解压对应提交的构建产物，使用 Node.js 运行；在临时离线工作区中分别检查通过、警告、编译失败、输出差异、日志、运行异常和长内容，调整终端至 120×30、80×24、40×12 检查导航。界面截图应来自实际终端，不能代替 Windows/macOS 实机验证。
-
-### 仅发布 Companion（0.2.7）
-
-常规发行时资源格式未变可不发布 C Exam Kit；首次迁移至新 scope 必须同时准备新资源包，按下方迁移流程执行。先在 main 以 `PUBLISH_LATEST`、`expected_version=0.2.7` 发布 CLI，确认 npm latest 已更新后查询 `npm view @routilet/c-exam-kit@latest version`，再以 `PUBLISH_LAUNCHERS`、`expected_version=0.2.7`、`expected_preset_version=<实际 latest>` 发布启动器。版本说明见 [0.2.7](releases/0.2.7.md)。继续使用人工触发，不改变发布授权机制。
-
-## Routilet npm 命名空间迁移（首次发布）
-
-新包统一使用 `@routilet`。旧 `@annouimo` 包及历史版本保留，不覆盖、不撤回。新命名空间首次需要同时发行 Companion 与 C Exam Kit，即使资源格式未变；版本号沿用当前源码。旧启动器无法自动发现新命名空间，用户需重新下载新版 ZIP，新启动器能识别旧安装并在两个新包均可用时迁移，不更改工作区或凭据。
-
-1. 合并经审核的迁移 PR；分别在 main 运行 `DRY_RUN`，下载通过完整构建验收的 `npm-release-tarball`。核对包名、版本、repository、LICENSE 和内容；可记录 tarball SHA-256。
-2. 由维护者登录 npm，先手动发布 `@routilet/c-exam-kit`，再发布 `@routilet/accoding-companion`：`npm publish ./<tarball>.tgz --access public --tag latest`（交互 2FA）。首次公开包若可通过 npm 的暂存审批发布，也可由维护者选择；不使用长期 token。
-3. 确认两个新包的 latest 均可安装后，运行 `PUBLISH_LAUNCHERS`（使用对应的两个版本号），发布新版 ZIP。用户审核前不触发该步骤。
-4. 在新包的 npm 设置配置 Trusted Publishing：GitHub owner `Routilet`，repo 分别 `accoding-companion`、`c-exam-kit`，workflow `publish-npm.yml`，environment 留空，允许 npm publish。临近下一次正常发行再配置，使用不同的未占用版本验证 OIDC；不为验证而重复发布已占用版本。
-5. 验证新启动器对旧安装的离线启动与在线迁移，再评估旧包弃用提示。不删除旧发行物。
+历史发布流程与旧版本说明见 Git 历史及 docs/releases。
