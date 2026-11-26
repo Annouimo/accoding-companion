@@ -276,14 +276,14 @@ func verify(ctx context.Context, r Runner, dir, version string) (Info, error) {
 	var info Info
 	out, err := r.CLI(ctx, dir, "--version")
 	if err != nil {
-		return info, err
+		return info, fmt.Errorf("Companion %s --version check failed: %w", version, err)
 	}
 	if strings.TrimSpace(string(out)) != version {
 		return info, errors.New("Companion version mismatch")
 	}
 	out, err = r.CLI(ctx, dir, "--installation-info")
 	if err != nil {
-		return info, err
+		return info, fmt.Errorf("Companion %s --installation-info 校验失败（需要支持新版安装协议的 Companion）：%w", version, err)
 	}
 	if err = json.Unmarshal(out, &info); err != nil {
 		return info, fmt.Errorf("installation-info: %w", err)
