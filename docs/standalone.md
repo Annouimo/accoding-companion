@@ -44,7 +44,7 @@ Existing numeric workspaces are never renamed. They continue to work with their 
 
 ## Importing the real exam-kit preset
 
-The preset remains owned by the [independent c-exam-kit repository](https://github.com/Annouimo/c-exam-kit/tree/feat/lightweight-io-standalone-preset). Clone it locally (or extract a ZIP), then set its directory or manifest as the CLI default:
+The preset remains owned by the [independent c-exam-kit repository](https://github.com/Routilet/c-exam-kit/tree/main/scaffold/presets/exam-io-c99). For normal use, install the versioned `@annouimo/c-exam-kit-preset` package using the Companion launcher. For local preset development, clone the repository (or extract a ZIP), then set its directory or manifest as the CLI default:
 
 ~~~sh
 accoding config preset "/Users/you/c-exam-kit/scaffold/presets/exam-io-c99"
