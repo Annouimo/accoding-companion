@@ -8,7 +8,8 @@ import type { StandaloneWorkflow, ResolvedProblem, SampleTestReport } from "./wo
 import { activityAccepted, type ApplicationState } from "./state";
 import { type UpdateMode } from "./preset-manager";
 import { courseSettings, droppedPath } from "./workspaces";
-import { SampleOutput } from "./sample-output";
+import { SampleOutput, type SampleOutputState } from "./sample-output";
+import { prepareObservation, runObservation, type ObserveSelection } from "./observer";
 import { warningCount } from "./compiler-diagnostics";
 import { Manual, ReferenceManual, initialReferenceView, parseReference, type ReferenceView } from "./manual";
 import { LoginForm } from "./login-form";
@@ -62,24 +63,41 @@ function openFolder(source: string): Promise<void> {
   });
 }
 
-function Screen({ app }: { app: StandaloneWorkflow }) {
+interface ResumeState {
+  page: Page;
+  cursor: number;
+  testResult: Record<string, SampleTestReport>;
+  details?: SampleTestReport;
+  sampleView?: SampleOutputState;
+  pendingOnly: Record<string, boolean>;
+  cursors: Map<string, number>;
+  state?: ApplicationState;
+  problems: ResolvedProblem[];
+  message?: string;
+}
+interface ObservationRequest {
+  problem: ResolvedProblem;
+  selection: ObserveSelection;
+  resume: ResumeState;
+}
+function Screen({ app, resume, onObserve }: { app: StandaloneWorkflow; resume?: ResumeState; onObserve: (request: ObservationRequest) => void }) {
   const { exit } = useApp();
   const { rows: height } = useWindowSize();
-  const [state, setState] = useState<ApplicationState>();
-  const [problems, setProblems] = useState<ResolvedProblem[]>([]);
-  const [page, setPage] = useState<Page>({});
+  const [state, setState] = useState<ApplicationState | undefined>(resume?.state);
+  const [problems, setProblems] = useState<ResolvedProblem[]>(resume?.problems ?? []);
+  const [page, setPage] = useState<Page>(resume?.page ?? {});
   const [panel, setPanel] = useState<Panel>();
   const [input, setInput] = useState("");
-  const [cursor, setCursor] = useState(0);
-  const [pendingOnly, setPendingOnly] = useState<Record<string, boolean>>({});
+  const [cursor, setCursor] = useState(resume?.cursor ?? 0);
+  const [pendingOnly, setPendingOnly] = useState<Record<string, boolean>>(resume?.pendingOnly ?? {});
   const [busy, setBusy] = useState("正在打开工作区…");
-  const [message, setMessage] = useState("");
-  const [testResult, setTestResult] = useState<Record<string, SampleTestReport>>({});
-  const [details, setDetails] = useState<SampleTestReport>();
+  const [message, setMessage] = useState(resume?.message ?? "");
+  const [testResult, setTestResult] = useState<Record<string, SampleTestReport>>(resume?.testResult ?? {});
+  const [details, setDetails] = useState<SampleTestReport | undefined>(resume?.details);
   const [manual, setManual] = useState<{ version: string; markdown: string; reference?: ReturnType<typeof parseReference>; file?: string }>();
   const manualViews = useRef(new Map<string, ReferenceView>());
   const [loginResume, setLoginResume] = useState<{ after?: () => void }>();
-  const cursors = useRef(new Map<string, number>());
+  const cursors = useRef(resume?.cursors ?? new Map<string, number>());
   const active = useRef(true);
   const locked = useRef(true);
   const root = state?.lastWorkspace;
@@ -105,8 +123,9 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   useEffect(() => {
     void (async () => {
       try {
-        await app.account(false).catch(() => undefined);
+        if (!resume) await app.account(false).catch(() => undefined);
         const { data, entries } = await reload();
+        if (resume && data.lastWorkspace === resume.state?.lastWorkspace) return;
         const saved = data.tuiPage;
         if (saved?.root === data.lastWorkspace) {
           setPage({ group: saved?.group, problem: saved?.problem });
@@ -330,6 +349,30 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
     ] });
   }
 
+  function requestObservation(selection: ObserveSelection, sampleView?: SampleOutputState) {
+    if (!problem || locked.current) return;
+    locked.current = true;
+    onObserve({ problem, selection, resume: {
+      page, cursor, testResult, details, sampleView, pendingOnly, cursors: cursors.current, state, problems
+    } });
+    // The outer loop starts the native process only after Ink has restored
+    // the terminal and waitUntilExit has completed.
+    exit();
+  }
+
+  function observe() {
+    if (!problem || locked.current) return;
+    const cases = problem.binding.cases.filter(c => c.enabled);
+    open({ title: "运行观察（当前源码）", rows: [
+      ...cases.map((sample, i) => ({
+        id: sample.id, label: (i+1) + ". " + sample.name,
+        run: () => requestObservation({caseId:sample.id,revision:sample.revision})
+      })),
+      { id: "empty", label: "空输入", run: () => requestObservation({input:""}) },
+      { id: "input", label: "临时输入（一行）", run: () => open({title:"输入测试数据",input: value => requestObservation({input:value})}) }
+    ]});
+  }
+
   async function test() {
     if (!problem) return;
     let report: SampleTestReport | undefined;
@@ -405,6 +448,7 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
   const entries: Row[] = problem ? [
     ...(passed ? [{ id: "submit", label: "提交本次通过的版本", run: () => submit(true) }] : []),
     { id: "test", label: passed ? "重新运行样例" : "运行样例", run: test },
+    ...(path.extname(problem.source).toLowerCase() === ".c" ? [{ id: "observe", label: "运行观察", run: observe }] : []),
     { id: "open", label: "打开代码目录", run: async () => {
       try { await openFolder(problem.source); }
       catch (error) { setMessage(String(error)); }
@@ -493,7 +537,11 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
       setLoginResume(undefined);
       loginResume.after?.();
     }} />;
-  if (details) return <SampleOutput report={details} onBack={() => setDetails(undefined)} />;
+  if (details) return <SampleOutput report={details} onBack={() => {setDetails(undefined);setMessage("");}}
+    initial={details === resume?.details ? resume?.sampleView : undefined}
+    observationError={details === resume?.details ? resume?.message : undefined}
+    onObserve={problem && path.extname(problem.source).toLowerCase() === ".c" ?
+      (entry, sampleView) => requestObservation({caseId:entry.id, revision:entry.revision}, sampleView) : undefined} />;
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box>
@@ -530,6 +578,19 @@ function Screen({ app }: { app: StandaloneWorkflow }) {
 }
 
 export async function startFullScreenTui(app: StandaloneWorkflow): Promise<void> {
-  const screen = render(<Screen app={app}/>, { exitOnCtrlC: false, patchConsole: false, alternateScreen: true });
-  await screen.waitUntilExit();
+  let resume: ResumeState | undefined;
+  for (;;) {
+    let request: ObservationRequest | undefined;
+    const screen = render(<Screen app={app} resume={resume} onObserve={value => {request=value;}}/>,
+      { exitOnCtrlC: false, patchConsole: false, alternateScreen: true });
+    await screen.waitUntilExit();
+    if (!request) return;
+    const job: ObservationRequest = request;
+    resume = job.resume;
+    try {
+      await runObservation(await prepareObservation(app,job.problem,job.selection));
+    } catch (error) {
+      resume.message = error instanceof Error ? error.message : String(error);
+    }
+  }
 }

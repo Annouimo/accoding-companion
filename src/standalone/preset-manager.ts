@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { dataDirectory } from "./state";
+import { resolvePackageFile } from "./observer";
 import { loadPreset, renderHeader, assembleC, quotedIncludes, PRESET_MANUAL, PRESET_REFERENCE, type LoadedPreset } from "./scaffold";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { withWorkspaceLock } from "../workspace/lock";
@@ -25,10 +26,22 @@ export interface InstalledPreset {
 const execFileAsync = promisify(execFile);
 
 async function globalPresets(): Promise<InstalledPreset[]> {
+  const found: InstalledPreset[] = [];
+  const add = (preset?: InstalledPreset) => {
+    if (preset && !found.some((entry) => entry.version === preset.version)) found.push(preset);
+  };
+  // npm resolves dependencies relative to this package, even if a legacy
+  // launcher installs another version at the top level.
+  if (process.env.ACCODING_PRESET_LEGACY_ONLY !== "1") {
+    for (const name of DATA_PACKAGES) {
+      const dependency = resolvePackageFile(name, "package.json");
+      if (dependency) add(await readInstalledPreset(path.dirname(dependency)));
+    }
+  }
   const managed = process.env.ACCODING_PRESET_PACKAGE;
   if (managed && path.isAbsolute(managed)) {
-    const preset = await readInstalledPreset(managed);
-    return preset ? [preset] : [];
+    add(await readInstalledPreset(managed));
+    return found;
   }
   let root: string;
   try {
@@ -41,13 +54,10 @@ async function globalPresets(): Promise<InstalledPreset[]> {
     root = stdout.trim();
   } catch {
     // A standalone binary can still read coursework and older local installs without npm.
-    return [];
+    return found;
   }
-  if (!path.isAbsolute(root)) return [];
-  const found: InstalledPreset[] = [];
-  for (const name of DATA_PACKAGES) {
-    const preset = await readInstalledPreset(path.join(root, name));
-    if (preset && !found.some((entry) => entry.version === preset.version)) found.push(preset);
+  if (path.isAbsolute(root)) {
+    for (const name of DATA_PACKAGES) add(await readInstalledPreset(path.join(root, name)));
   }
   return found;
 }
@@ -97,6 +107,11 @@ export async function presetForVersion(version: string): Promise<InstalledPreset
   if (!VERSION.test(version)) throw new Error("无效的脚手架版本号。");
   const global = (await globalPresets()).find((entry) => entry.version === version);
   if (global) return global;
+  const managed = process.env.ACCODING_PRESET_PACKAGE;
+  if (managed && path.isAbsolute(managed) && /^0\.6\.(?:9|[1-9][0-9]+)$/.test(version)) {
+    const candidate = await readInstalledPreset(managed);
+    if (candidate?.version === version) return candidate;
+  }
   const legacy = await legacyPreset(version);
   if (legacy) return legacy;
   throw new Error("此脚手架版本尚未安装。请安装对应版本的资源包（新发行使用 " + DATA_PACKAGE + "@" + version + "，历史版本可使用 " + LEGACY_DATA_PACKAGE + "@" + version + "）");

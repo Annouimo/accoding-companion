@@ -501,7 +501,7 @@ export class StandaloneWorkflow {
   }
 
   async prepare(resolved: ResolvedProblem): Promise<{
-    source: string; code: string; diagnosticCode: string; originalHash: string
+    source: string; code: string; diagnosticCode: string; originalHash: string; original: string
   }> {
     const original = await fs.readFile(resolved.source, "utf8");
     const originalHash = hash(original);
@@ -517,7 +517,7 @@ export class StandaloneWorkflow {
       if (shared) {
         const preset = await loadPreset(await sharedPresetPath(resolved.root, shared.key));
         const assembled = assembleC(original, preset, shared.include, sourceName);
-        return { source: resolved.source, code: assembled.code, diagnosticCode: assembled.diagnosticCode, originalHash };
+        return { source: resolved.source, code: assembled.code, diagnosticCode: assembled.diagnosticCode, originalHash, original };
       }
       const presetFile = path.join(resolved.root, ".accoding", "scaffold",
         resolved.binding.bindingId, "manifest.json");
@@ -550,7 +550,7 @@ export class StandaloneWorkflow {
         }
       }
     }
-    return { source: resolved.source, code, diagnosticCode, originalHash };
+    return { source: resolved.source, code, diagnosticCode, originalHash, original };
   }
 
   private async compilerDiagnostics(

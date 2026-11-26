@@ -9,6 +9,7 @@ import { StandaloneWorkflow, type ResolvedProblem } from "./workflow";
 import { ask, confirm, interactive, select } from "./terminal";
 import { activityAccepted } from "./state";
 import { compilerErrorMessage } from "./compiler-guide";
+import { prepareObservation, runObservation } from "./observer";
 
 function option(args: string[], name: string): string | undefined {
   const at = args.indexOf(name);
@@ -29,6 +30,7 @@ function usage() {
     "  accoding problem init ID|URL     初始化单题",
     "  accoding test PATH               测试当前 C/C++ 源文件",
     "  accoding submit PATH             提交源文件",
+    "  accoding observe PATH [--sample N] 观察当前 C 源码及指定样例",
     "  accoding file PATH               当前文件的简洁操作菜单",
     "  accoding status [--watch]        查询等待中的 OJ 评测",
     "  accoding sync                    手动同步题目与比赛",
@@ -310,6 +312,29 @@ async function run(): Promise<void> {
     if (command === "test" && args[1]) {
       const passed = await runTest(app, await app.resolve(args[1]));
       if (!passed) process.exitCode = 1;
+      return;
+    }
+    if (command === "observe" && args[1]) {
+      const problem = await app.resolve(args[1]);
+      const cases = problem.binding.cases.filter(c => c.enabled);
+      const number = option(args, "--sample");
+      let selection: { caseId?: string; revision?: number; input?: string } = {};
+      if (number !== undefined) {
+        if (!/^\d+$/.test(number) || Number(number)<1 || Number(number)>cases.length)
+          throw new Error("--sample 必须是启用样例的有效编号（从 1 开始）。");
+        const sample = cases[Number(number)-1];
+        selection = { caseId: sample.id, revision: sample.revision };
+      } else if (cases.length) {
+        const chosen = await select("选择观察样例（当前源码）",cases.map((c,i)=>({label:(i+1)+". "+c.name,value:c.id})));
+        if (chosen===undefined) return;
+        const sample=cases.find(c=>c.id===chosen)!;
+        selection={caseId:sample.id,revision:sample.revision};
+      } else {
+        const input=await ask("没有启用样例，请输入测试数据（一行）");
+        if (input===undefined) return;
+        selection={input};
+      }
+      await runObservation(await prepareObservation(app,problem,selection));
       return;
     }
     if (command === "submit" && args[1]) {
