@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -353,6 +354,7 @@ func (c *Candidate) Commit(ctx context.Context) (Info, error) {
 	if err != nil {
 		return info, err
 	}
+	if !reflect.DeepEqual(info,c.Info) { return info, errors.New("reviewed component state changed; resolve again") }
 	if err = writeJSON(filepath.Join(c.stage, "installation.json"), info); err != nil {
 		return info, err
 	}

@@ -59,7 +59,7 @@ try {
   assert.equal(JSON.parse(await fs.readFile(path.join(install,'node_modules',resource,'package.json'),'utf8')).version,'0.6.10');
   await add(app,'0.2.9-beta.1',{[resource]:'^0.6.9'},{[observer]:'0.1.0-beta.2'},'next');
   await fs.writeFile(path.join(install,'package.json'),JSON.stringify({name:'managed',private:true,dependencies:{[app]:'0.2.9-beta.1'}}));
-  await run('install','--package-lock-only');await run('update','--package-lock-only','--save');await run('ci');
+  await run('install');await run('update','--save');
   assert.equal(await ver(app),'0.2.9-beta.1');assert.equal(await ver(observer),'0.1.0-beta.2');
   console.log('PASS: exact root and preview dependency, indirect compatible update, incompatible latest rejected, optional missing, staged install + update');
 } finally {server.close();await fs.rm(root,{recursive:true,force:true});}

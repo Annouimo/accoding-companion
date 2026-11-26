@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -172,7 +173,7 @@ func updateV2(root, channel string, r nodeRuntime) (string, error) {
 	}
 	defer candidate.Close()
 	if len(candidate.Changes) == 0 {
-		if _, err := m.VerifyCurrent(ctx); err == nil {
+		if current, err := m.VerifyCurrent(ctx); err == nil && reflect.DeepEqual(current,candidate.Info) {
 			return "软件及兼容依赖已是当前版本。", nil
 		}
 		// A damaged installation can be repaired even without version changes.
