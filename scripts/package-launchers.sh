@@ -34,7 +34,7 @@ for os in windows darwin; do
   for arch in amd64 arm64; do
     bundle="$stage/$os-$arch"
     mkdir -p "$bundle/images"
-    sed -e "s/@VERSION@/$companion_version/g" -e "s/@LAUNCHER_VERSION@/$version/g" "$repo/docs/launcher/使用说明.html" > "$bundle/使用说明.html"
+    node "$repo/scripts/render-launcher-guide.mjs" "$repo/docs/launcher/使用说明.html" "$bundle/使用说明.html" "$companion_version" "$version" "$managed_v2"
     cp "$repo/docs/launcher/编译环境配置.html" "$bundle/编译环境配置.html"
     test -s "$bundle/编译环境配置.html"
     cp "$repo/docs/launcher/images/contest-list.png" "$bundle/images/"

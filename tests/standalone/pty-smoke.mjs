@@ -190,8 +190,8 @@ await scenario("missing compiler reports local guidance without opening a browse
   await assert.rejects(fs.access(marker));
   ctx.send("\r");
   await ctx.expect("未找到 C 编译器");
-  await ctx.expect("编译环境配置");
   await ctx.expect("PATH");
+  await ctx.expect("编译环境配置");
   await delay(200);
   await assert.rejects(fs.access(marker), {code:"ENOENT"});
   await fs.access(path.resolve("docs/launcher/编译环境配置.html"));
