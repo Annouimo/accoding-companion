@@ -1,5 +1,5 @@
 {
-  "name": "@annouimo/accoding-companion",
+  "name": "@routilet/accoding-companion",
   "version": "0.2.7",
   "description": "Non-official Accoding companion for C/C++ coursework",
   "type": "module",

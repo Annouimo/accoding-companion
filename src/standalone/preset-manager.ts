@@ -12,7 +12,9 @@ import { WorkspaceStore } from "../workspace/store";
 import { cTemplate, languages } from "../workspace/sources";
 import { hash, type Binding } from "../model";
 
-const DATA_PACKAGE = "@annouimo/c-exam-kit-preset";
+const DATA_PACKAGE = "@routilet/c-exam-kit-preset";
+const LEGACY_DATA_PACKAGE = "@annouimo/c-exam-kit-preset";
+const DATA_PACKAGES = [DATA_PACKAGE, LEGACY_DATA_PACKAGE];
 const VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/;
 
 export interface InstalledPreset {
@@ -22,9 +24,12 @@ export interface InstalledPreset {
 
 const execFileAsync = promisify(execFile);
 
-async function globalPreset(): Promise<InstalledPreset | undefined> {
+async function globalPresets(): Promise<InstalledPreset[]> {
   const managed = process.env.ACCODING_PRESET_PACKAGE;
-  if (managed && path.isAbsolute(managed)) return readInstalledPreset(managed);
+  if (managed && path.isAbsolute(managed)) {
+    const preset = await readInstalledPreset(managed);
+    return preset ? [preset] : [];
+  }
   let root: string;
   try {
     const windows = process.platform === "win32";
@@ -36,9 +41,15 @@ async function globalPreset(): Promise<InstalledPreset | undefined> {
     root = stdout.trim();
   } catch {
     // A standalone binary can still read coursework and older local installs without npm.
-    return;
+    return [];
   }
-  if (path.isAbsolute(root)) return readInstalledPreset(path.join(root, DATA_PACKAGE));
+  if (!path.isAbsolute(root)) return [];
+  const found: InstalledPreset[] = [];
+  for (const name of DATA_PACKAGES) {
+    const preset = await readInstalledPreset(path.join(root, name));
+    if (preset && !found.some((entry) => entry.version === preset.version)) found.push(preset);
+  }
+  return found;
 }
 
 async function readInstalledPreset(packageRoot: string): Promise<InstalledPreset | undefined> {
@@ -50,7 +61,7 @@ async function readInstalledPreset(packageRoot: string): Promise<InstalledPreset
     throw error;
   }
   const manifestPath = path.join(packageRoot, "preset", "manifest.json");
-  if (info.name !== DATA_PACKAGE || !info.version || !VERSION.test(info.version))
+  if (!info.name || !DATA_PACKAGES.includes(info.name) || !info.version || !VERSION.test(info.version))
     throw new Error("脚手架包元数据无效：" + packageRoot);
   try {
     return { version: info.version, preset: await loadPreset(manifestPath) };
@@ -60,15 +71,17 @@ async function readInstalledPreset(packageRoot: string): Promise<InstalledPreset
 }
 
 async function legacyPreset(version: string): Promise<InstalledPreset | undefined> {
-  const folder = path.join(dataDirectory(), "presets", version, "node_modules", DATA_PACKAGE);
-  const preset = await readInstalledPreset(folder);
-  if (preset?.version === version) return preset;
+  for (const name of DATA_PACKAGES) {
+    const folder = path.join(dataDirectory(), "presets", version, "node_modules", name);
+    const preset = await readInstalledPreset(folder);
+    if (preset?.version === version) return preset;
+  }
 }
 
 /** Prefer the npm global package. Older per-version installs are a migration fallback. */
 export async function installedPresets(): Promise<InstalledPreset[]> {
-  const global = await globalPreset();
-  if (global) return [global];
+  const global = await globalPresets();
+  if (global.length) return global;
   let names: string[];
   try { names = await fs.readdir(path.join(dataDirectory(), "presets")); }
   catch (error) {
@@ -82,11 +95,11 @@ export async function installedPresets(): Promise<InstalledPreset[]> {
 
 export async function presetForVersion(version: string): Promise<InstalledPreset> {
   if (!VERSION.test(version)) throw new Error("无效的脚手架版本号。");
-  const global = await globalPreset();
-  if (global?.version === version) return global;
+  const global = (await globalPresets()).find((entry) => entry.version === version);
+  if (global) return global;
   const legacy = await legacyPreset(version);
   if (legacy) return legacy;
-  throw new Error("此脚手架版本尚未安装。请运行 npm install -g " + DATA_PACKAGE + "@" + version);
+  throw new Error("此脚手架版本尚未安装。请安装对应版本的资源包（新发行使用 " + DATA_PACKAGE + "@" + version + "，历史版本可使用 " + LEGACY_DATA_PACKAGE + "@" + version + "）");
 }
 
 export async function setCoursePresetVersion(root: string, version: string): Promise<void> {
