@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 declare const __ACCODING_VERSION__: string;
 import path from "node:path";
 import { configDirectory } from "./state";
+import { installationInfo } from "./installation-info";
 import { startFullScreenTui } from "./tui";
 import { migrateLegacyWorkspace } from "./migrate";
 import { spawn } from "node:child_process";
@@ -281,6 +282,10 @@ async function run(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.includes("--version") || args.includes("-V")) {
     console.log(__ACCODING_VERSION__); return;
+  }
+  if (args.length === 1 && args[0] === "--installation-info") {
+    console.log(JSON.stringify(await installationInfo(__ACCODING_VERSION__)));
+    return;
   }
   if (args.includes("--help") || args.includes("-h")) { usage(); return; }
   const app = new StandaloneWorkflow();

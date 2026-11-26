@@ -1,38 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { createRequire as createNodeRequire } from "node:module";
-import { execFile, spawn } from "node:child_process";
-import { promisify } from "node:util";
+import { resolvePackageFile } from "./installed-packages";
+import { observerBinaryFromManifest, probeObserverBinary } from "./installation-info";
+export { resolvePackageFile } from "./installed-packages";
+export { observerBinaryFromManifest } from "./installation-info";
+import { spawn } from "node:child_process";
 import type { StandaloneWorkflow, ResolvedProblem } from "./workflow";
 
-const exec = promisify(execFile);
-const runtimeRequire = createNodeRequire(import.meta.url);
 const PACKAGE = "@routilet/c-observer";
 const LEGACY_PACKAGE = "@annouimo/c-observer";
 const SESSION_SCHEMA = 1;
-
-export function resolvePackageFile(name: string, file: string): string | undefined {
-  try { return runtimeRequire.resolve(name + "/" + file); }
-  catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "MODULE_NOT_FOUND" || code === "ERR_PACKAGE_PATH_NOT_EXPORTED") return;
-    throw error;
-  }
-}
-
-export function observerBinaryFromManifest(root: string, value: unknown, platform = process.platform as string, arch = process.arch as string): string {
-  const data = value as { schemaVersion?: number; sessionSchemaVersions?: number[]; platforms?: Record<string, { executable?: string }> } | null;
-  if (!data || data.schemaVersion !== 1 || !Array.isArray(data.sessionSchemaVersions) || !data.sessionSchemaVersions.includes(SESSION_SCHEMA))
-    throw new Error("C Observer 软件包协议不兼容。");
-  const executable = data.platforms?.[platform + "-" + arch]?.executable;
-  if (typeof executable !== "string") throw new Error("当前平台尚未提供 C Observer。");
-  const binary = path.resolve(root, executable);
-  const relative = path.relative(root, binary);
-  if (!relative || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative))
-    throw new Error("C Observer 软件包路径无效。");
-  return binary;
-}
 
 export async function resolveObserver(): Promise<string> {
   const override = process.env.ACCODING_OBSERVER_PATH;
@@ -41,17 +19,11 @@ export async function resolveObserver(): Promise<string> {
     if (!path.isAbsolute(override)) throw new Error("ACCODING_OBSERVER_PATH 必须是绝对路径。");
     binary = override;
   } else {
-    const manifest = resolvePackageFile(PACKAGE, "manifest.json") ?? resolvePackageFile(LEGACY_PACKAGE, "manifest.json");
+    const manifest = resolvePackageFile(PACKAGE, "manifest.json") ?? (process.env.ACCODING_MANAGED_V2 === "1" ? undefined : resolvePackageFile(LEGACY_PACKAGE, "manifest.json"));
     if (!manifest) throw new Error("未安装 C Observer。请更新 Companion；开发联调可指定 ACCODING_OBSERVER_PATH。");
     binary = observerBinaryFromManifest(path.dirname(manifest), JSON.parse(await fs.readFile(manifest,"utf8")));
   }
-  const info = await fs.stat(binary).catch(() => undefined);
-  if (!info?.isFile()) throw new Error("找不到 C Observer 可执行文件。");
-  const { stdout } = await exec(binary, ["--capabilities"], { timeout: 5000, maxBuffer: 65536, windowsHide: true });
-  const capability = JSON.parse(stdout) as { sessionSchemaVersions?: number[]; backends?: string[] };
-  if (!Array.isArray(capability.sessionSchemaVersions) || !capability.sessionSchemaVersions.includes(SESSION_SCHEMA) ||
-      !Array.isArray(capability.backends) || !capability.backends.length)
-    throw new Error("C Observer 当前版本不支持本机观察协议或后端。");
+  await probeObserverBinary(binary);
   return binary;
 }
 

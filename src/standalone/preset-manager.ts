@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { dataDirectory } from "./state";
-import { resolvePackageFile } from "./observer";
+import { resolvePackageFile } from "./installed-packages";
 import { loadPreset, renderHeader, assembleC, quotedIncludes, PRESET_MANUAL, PRESET_REFERENCE, type LoadedPreset } from "./scaffold";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { withWorkspaceLock } from "../workspace/lock";
@@ -25,7 +25,16 @@ export interface InstalledPreset {
 
 const execFileAsync = promisify(execFile);
 
+export async function bundledPreset(): Promise<InstalledPreset | undefined> {
+  const dependency=resolvePackageFile(DATA_PACKAGE,"package.json");
+  if(dependency) return readInstalledPreset(path.dirname(dependency));
+}
+
 async function globalPresets(): Promise<InstalledPreset[]> {
+  if(process.env.ACCODING_MANAGED_V2 === "1") {
+    const bundled=await bundledPreset();
+    return bundled?[bundled]:[];
+  }
   const found: InstalledPreset[] = [];
   const add = (preset?: InstalledPreset) => {
     if (preset && !found.some((entry) => entry.version === preset.version)) found.push(preset);
