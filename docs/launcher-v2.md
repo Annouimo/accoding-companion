@@ -27,3 +27,7 @@ accoding --installation-info 在构造业务对象之前执行，无网络、无
 ## 安装信息接口实现
 
 新增 --installation-info，复用严格本地 C Exam Kit 解析，不访问全局 npm。Observer 使用 manifest / --capabilities 本地检查；缺失或不支持平台不阻断。其运行入口仍由 Observer 集成分支维护，汇合时将其 resolvePackageFile / observerBinaryFromManifest / probeObserverBinary 改为共用接口。C Exam Kit 依赖同 Observer 分支，旧启动器兼容保留。ACCODING_MANAGED_V2=1 禁用运行时全局包发现。仅安装信息接口与依赖调整，不提前发布 Observer。
+
+## 开发入口与配置隔离
+
+运行 launcher --managed-v2 可进入开发中的新版入口；默认仍运行旧版，待配套 Companion 预览版可用并验收后再切换。首页安装/启动/统一更新、候选锁差异确认、渠道切换、离线旧安装启动和回退已接入。预览配置及数据使用独立 profile，macOS Keychain 使用独立服务名，Windows DPAPI 使用独立配置目录。用户可以主动选择其他课程目录；不是安全沙箱。当前不提供删除历史安装、卸载或自动清理，直到运行租约和 Windows 文件替换验证完成。轻量后台只检查 Companion 标签，手动更新会完整解析间接依赖。

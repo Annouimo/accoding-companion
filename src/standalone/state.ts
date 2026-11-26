@@ -24,10 +24,13 @@ export interface ApplicationState {
   problems: Record<string, ProblemActivity>;
 }
 
+export function previewProfile(): boolean { return process.env.ACCODING_PROFILE === "preview"; }
+
 export function configDirectory(): string {
+  const name = previewProfile() ? "accoding-companion-preview" : "accoding-companion";
   return process.platform === "win32"
-    ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "accoding-companion")
-    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "accoding-companion");
+    ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), name)
+    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), name);
 }
 export const emptyState = (): ApplicationState => ({ schemaVersion: 1, problems: {} });
 
@@ -160,11 +163,12 @@ export function activityAccepted(activity: ProblemActivity): boolean {
 
 /** User-owned package cache, kept outside coursework and npm's global prefix. */
 export function dataDirectory(): string {
+  const name = previewProfile() ? "Accoding Companion Preview" : "Accoding Companion";
   if (process.platform === "win32")
     return path.join(process.env.LOCALAPPDATA ||
-      path.join(os.homedir(), "AppData", "Local"), "Accoding Companion");
+      path.join(os.homedir(), "AppData", "Local"), name);
   if (process.platform === "darwin")
     return path.join(os.homedir(), "Library", "Application Support", "Accoding Companion");
   return path.join(process.env.XDG_DATA_HOME ||
-    path.join(os.homedir(), ".local", "share"), "accoding-companion");
+    path.join(os.homedir(), ".local", "share"), previewProfile() ? "accoding-companion-preview" : "accoding-companion");
 }

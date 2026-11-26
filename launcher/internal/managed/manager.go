@@ -397,3 +397,35 @@ func (m Manager) Rollback(ctx context.Context) (Info, error) {
 	}
 	return info, writeState(dir, Activation{schema, s.Previous, s.Current})
 }
+
+// InstalledInfo reads the last verified metadata without starting Node.
+func (m Manager) InstalledInfo() (Info, error) {
+	var info Info
+	dir, err := m.Current()
+	if err != nil || dir == "" {
+		return info, err
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "installation.json"))
+	if err != nil {
+		return info, err
+	}
+	if json.Unmarshal(raw, &info) != nil || info.SchemaVersion != schema || !info.Ready || !validVersion(m.Channel, info.Version) {
+		return info, errors.New("invalid installation information")
+	}
+	return info, nil
+}
+
+func (m Manager) VerifyCurrent(ctx context.Context) (Info, error) {
+	info, err := m.InstalledInfo()
+	if err != nil {
+		return info, err
+	}
+	dir, err := m.Current()
+	if err != nil || dir == "" {
+		return info, errors.New("no active installation")
+	}
+	if _, _, err = readLock(dir, info.Version); err != nil {
+		return info, err
+	}
+	return verify(ctx, m.Runner, dir, info.Version)
+}

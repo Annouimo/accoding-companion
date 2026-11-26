@@ -150,7 +150,11 @@ func (m menu) View() string {
 }
 
 func main() {
-	if err := run(); err != nil {
+	runLauncher := run
+	if managedV2Default == "1" || (len(os.Args) == 2 && os.Args[1] == "--managed-v2") {
+		runLauncher = runV2
+	}
+	if err := runLauncher(); err != nil {
 		fmt.Fprintln(os.Stderr, "启动器出错："+err.Error())
 		fmt.Print("按 Enter 关闭。")
 		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
