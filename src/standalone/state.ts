@@ -168,7 +168,7 @@ export function dataDirectory(): string {
     return path.join(process.env.LOCALAPPDATA ||
       path.join(os.homedir(), "AppData", "Local"), name);
   if (process.platform === "darwin")
-    return path.join(os.homedir(), "Library", "Application Support", "Accoding Companion");
+    return path.join(os.homedir(), "Library", "Application Support", name);
   return path.join(process.env.XDG_DATA_HOME ||
     path.join(os.homedir(), ".local", "share"), previewProfile() ? "accoding-companion-preview" : "accoding-companion");
 }

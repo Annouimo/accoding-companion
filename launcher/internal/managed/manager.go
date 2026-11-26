@@ -405,27 +405,13 @@ func (m Manager) InstalledInfo() (Info, error) {
 	if err != nil || dir == "" {
 		return info, err
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "installation.json"))
-	if err != nil {
-		return info, err
-	}
-	if json.Unmarshal(raw, &info) != nil || info.SchemaVersion != schema || !info.Ready || !validVersion(m.Channel, info.Version) {
-		return info, errors.New("invalid installation information")
-	}
-	return info, nil
+	return verifiedMetadata(dir, m.Channel)
 }
 
 func (m Manager) VerifyCurrent(ctx context.Context) (Info, error) {
-	info, err := m.InstalledInfo()
-	if err != nil {
-		return info, err
+	_, info, free, err := m.AcquireCurrent(ctx)
+	if free != nil {
+		defer free()
 	}
-	dir, err := m.Current()
-	if err != nil || dir == "" {
-		return info, errors.New("no active installation")
-	}
-	if _, _, err = readLock(dir, info.Version); err != nil {
-		return info, err
-	}
-	return verify(ctx, m.Runner, dir, info.Version)
+	return info, err
 }

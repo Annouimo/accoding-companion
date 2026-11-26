@@ -172,7 +172,11 @@ func updateV2(root, channel string, r nodeRuntime) (string, error) {
 	}
 	defer candidate.Close()
 	if len(candidate.Changes) == 0 {
-		return "软件及兼容依赖已是当前版本。", nil
+		if _, err := m.VerifyCurrent(ctx); err == nil {
+			return "软件及兼容依赖已是当前版本。", nil
+		}
+		// A damaged installation can be repaired even without version changes.
+		fmt.Println("当前安装未通过检查，将尝试重新安装相同版本。")
 	}
 	var lines []string
 	lines = append(lines, channelName(channel)+" · Companion "+version)
@@ -202,18 +206,20 @@ func updateV2(root, channel string, r nodeRuntime) (string, error) {
 		return "", err
 	}
 	progress(5, "安装完成")
-	return "已就绪 · Companion " + info.Version, nil
+	note := "已就绪 · Companion " + info.Version
+	if _, err := m.Cleanup(); err != nil {
+		note += "\n历史安装暂未清理：" + err.Error()
+	}
+	return note, nil
 }
 
 func startV2(root, channel string, r nodeRuntime) error {
 	m := v2Manager(root, channel, r)
-	if _, err := m.VerifyCurrent(context.Background()); err != nil {
+	dir, _, free, err := m.AcquireCurrent(context.Background())
+	if err != nil {
 		return err
 	}
-	dir, err := m.Current()
-	if err != nil || dir == "" {
-		return errors.New("没有可用的安装")
-	}
+	defer free()
 	entry := filepath.Join(dir, "node_modules", filepath.FromSlash(managed.App), "dist", "accoding.mjs")
 	cmd := exec.Command(r.node, entry)
 	profile := "stable"
@@ -275,6 +281,9 @@ func runV2() error {
 			options = append(options, v2Option{"update", "安装"})
 		}
 		options = append(options, v2Option{"guide", "使用说明"}, v2Option{"settings", "设置"})
+		if info.Version != "" {
+			options = append(options, v2Option{"uninstall", "卸载当前渠道"})
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		var check tea.Cmd
 		if hasApp && nodeErr == nil {
@@ -320,6 +329,14 @@ func runV2() error {
 			}
 			if err != nil {
 				pause("安装或更新失败，保留原安装：" + err.Error())
+			}
+		case "uninstall":
+			if confirm("卸载"+channelName(s.Channel)+"？保留课程、应用配置、运行环境和其他渠道。") {
+				if err = m.Uninstall(); err != nil {
+					note = "卸载未完成：" + err.Error()
+				} else {
+					note = "当前渠道已卸载。"
+				}
 			}
 		case "guide":
 			if err = showGuide(guide); err != nil {

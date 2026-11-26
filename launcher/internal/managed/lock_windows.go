@@ -14,16 +14,24 @@ var lockFileEx = kernel32.NewProc("LockFileEx")
 var unlockFileEx = kernel32.NewProc("UnlockFileEx")
 
 func lockChannel(dir string) (func(), error) {
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	return lockPath(filepath.Join(dir, "write.lock"), true)
+}
+
+func lockPath(path string, exclusive bool) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "write.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
 	var ov syscall.Overlapped
-	// LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, first byte.
-	ok, _, err := lockFileEx.Call(f.Fd(), 3, 0, 1, 0, uintptr(unsafe.Pointer(&ov)))
+	// LOCKFILE_FAIL_IMMEDIATELY, optionally LOCKFILE_EXCLUSIVE_LOCK.
+	flags := uintptr(1)
+	if exclusive {
+		flags |= 2
+	}
+	ok, _, err := lockFileEx.Call(f.Fd(), flags, 0, 1, 0, uintptr(unsafe.Pointer(&ov)))
 	if ok == 0 {
 		f.Close()
 		return nil, err

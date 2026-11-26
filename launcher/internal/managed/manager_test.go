@@ -153,3 +153,65 @@ func TestChannelLock(t *testing.T) {
 	}
 	again()
 }
+
+func TestRunningReleaseRetainedAndUninstallProtected(t *testing.T) {
+	ctx := context.Background()
+	r := &fakeRunner{version: "0.2.8", dep: "0.6.9"}
+	m := Manager{t.TempDir(), "latest", r}
+	install := func(version string) {
+		t.Helper()
+		c, err := m.Plan(ctx, version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		if _, err := c.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	install("0.2.8")
+	first, _, free, err := m.AcquireCurrent(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	install("0.2.9")
+	install("0.2.10")
+	if count, err := m.Cleanup(); err != nil || count != 0 {
+		t.Fatalf("removed leased release: %d %v", count, err)
+	}
+	if _, err := os.Stat(first); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := m.State()
+	if err := m.Uninstall(); err == nil {
+		t.Fatal("uninstall removed a running release")
+	}
+	if after, _ := m.State(); after != before {
+		t.Fatal("failed uninstall changed active state")
+	}
+	free()
+	if count, err := m.Cleanup(); err != nil || count != 1 {
+		t.Fatalf("cleanup: %d %v", count, err)
+	}
+	if _, err := os.Stat(first); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("old release remained")
+	}
+	preview := Manager{m.Root, "next", r}
+	c, err := preview.Plan(ctx, "0.3.0-beta.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Uninstall(); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := m.State(); s.Current != "" {
+		t.Fatal("uninstall retained active channel")
+	}
+	if s, _ := preview.State(); s.Current == "" {
+		t.Fatal("uninstall removed preview")
+	}
+}
