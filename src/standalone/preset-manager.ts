@@ -13,7 +13,7 @@ import { WorkspaceStore } from "../workspace/store";
 import { cTemplate, languages } from "../workspace/sources";
 import { hash, type Binding } from "../model";
 
-const DATA_PACKAGE = "@routilet/c-exam-kit-preset";
+const DATA_PACKAGE = "@routilet/c-exam-kit";
 const LEGACY_DATA_PACKAGE = "@annouimo/c-exam-kit-preset";
 const DATA_PACKAGES = [DATA_PACKAGE, LEGACY_DATA_PACKAGE];
 const VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/;
