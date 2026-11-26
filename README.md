@@ -62,7 +62,7 @@ node dist/accoding.mjs status --watch
 也可以直接通过 npm 安装并启动：
 
 ```sh
-npm install -g @routilet/accoding-companion @routilet/c-exam-kit-preset
+npm install -g @routilet/accoding-companion @routilet/c-exam-kit
 accoding
 ```
 
@@ -72,7 +72,7 @@ accoding
 
 ## npm 命名空间迁移
 
-新版使用 `@routilet/accoding-companion` 和 `@routilet/c-exam-kit-preset`。原 `@annouimo` 包保留历史版本；旧启动器不会自动发现新命名空间，请从最新 Release 重新下载启动器。新原生启动器可离线启动已有旧安装，并在两个新包均可用时提示迁移；课程目录、登录凭据、资源快照不变。直接通过全局 npm 安装的用户，请在新包可用后先运行 `npm uninstall -g @annouimo/accoding-companion`（仅移除旧 CLI，避免同名命令冲突），再执行上面的新包安装命令；旧资源包可保留。不要在新发行包可用之前移除旧程序。
+新版使用 `@routilet/accoding-companion` 和 `@routilet/c-exam-kit`。原 `@annouimo` 包保留历史版本；旧启动器不会自动发现新命名空间，请从最新 Release 重新下载启动器。新原生启动器可离线启动已有旧安装，并在两个新包均可用时提示迁移；课程目录、登录凭据、资源快照不变。直接通过全局 npm 安装的用户，请在新包可用后先运行 `npm uninstall -g @annouimo/accoding-companion`（仅移除旧 CLI，避免同名命令冲突），再执行上面的新包安装命令；旧资源包可保留。不要在新发行包可用之前移除旧程序。
 
 ## 数据迁移与安全
 

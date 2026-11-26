@@ -46,7 +46,7 @@ Existing numeric workspaces are never renamed. They continue to work with their 
 
 ## Importing the real exam-kit preset
 
-The preset remains owned by the [independent c-exam-kit repository](https://github.com/Routilet/c-exam-kit/tree/main/scaffold/presets/exam-io-c99). For normal use, install the versioned `@routilet/c-exam-kit-preset` package using the Companion launcher. For local preset development, clone the repository, build its versioned manifest, and select that generated manifest:
+The preset remains owned by the [independent c-exam-kit repository](https://github.com/Routilet/c-exam-kit/tree/main/scaffold/presets/exam-io-c99). For normal use, install the versioned `@routilet/c-exam-kit` package using the Companion launcher. For local preset development, clone the repository, build its versioned manifest, and select that generated manifest:
 
 ~~~sh
 cd /path/to/c-exam-kit
