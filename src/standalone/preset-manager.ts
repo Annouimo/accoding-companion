@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { dataDirectory } from "./state";
+import { resolvePackageFile } from "./installed-packages";
 import { loadPreset, renderHeader, assembleC, quotedIncludes, PRESET_MANUAL, PRESET_REFERENCE, type LoadedPreset } from "./scaffold";
 import { atomicWrite, safePath } from "../workspace/fs";
 import { withWorkspaceLock } from "../workspace/lock";
@@ -22,7 +23,19 @@ export interface InstalledPreset {
 
 const execFileAsync = promisify(execFile);
 
+// Strict installed-package lookup shared by runtime and offline verification.
+export async function bundledPreset(): Promise<InstalledPreset | undefined> {
+  const dependency = resolvePackageFile(DATA_PACKAGE, "package.json");
+  if (dependency) return readInstalledPreset(path.dirname(dependency));
+}
+
 async function globalPreset(): Promise<InstalledPreset | undefined> {
+  const managedV2 = process.env.ACCODING_MANAGED_V2 === "1";
+  if (managedV2 || process.env.ACCODING_PRESET_LEGACY_ONLY !== "1") {
+    const installed = await bundledPreset();
+    if (installed) return installed;
+  }
+  if (managedV2) return;
   const managed = process.env.ACCODING_PRESET_PACKAGE;
   if (managed && path.isAbsolute(managed)) return readInstalledPreset(managed);
   let root: string;
@@ -84,6 +97,11 @@ export async function presetForVersion(version: string): Promise<InstalledPreset
   if (!VERSION.test(version)) throw new Error("无效的脚手架版本号。");
   const global = await globalPreset();
   if (global?.version === version) return global;
+  const managed = process.env.ACCODING_PRESET_PACKAGE;
+  if (managed && path.isAbsolute(managed) && /^0\.6\.(?:9|[1-9][0-9]+)$/.test(version)) {
+    const candidate = await readInstalledPreset(managed);
+    if (candidate?.version === version) return candidate;
+  }
   const legacy = await legacyPreset(version);
   if (legacy) return legacy;
   throw new Error("此脚手架版本尚未安装。请运行 npm install -g " + DATA_PACKAGE + "@" + version);

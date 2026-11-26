@@ -23,3 +23,7 @@ accoding --installation-info 在构造业务对象之前执行，无网络、无
 5. HTML 定稿审核、预览发行、实机及断网验收。Observer Windows/GDB 暂缓，启动器 Windows 支持保留。
 
 本地原型已验证 Node 22.16.0/npm 10.9.2、Go 1.23.2 Linux amd64；Windows amd64、Darwin arm64 交叉编译。提交后的 CI 需独立确认，不等于实机验收。阶段一不改变现有入口、正式版本或发行工作流。
+
+## 安装信息接口实现
+
+新增 --installation-info，复用严格本地 C Exam Kit 解析，不访问全局 npm。Observer 使用 manifest / --capabilities 本地检查；缺失或不支持平台不阻断。其运行入口仍由 Observer 集成分支维护，汇合时将其 resolvePackageFile / observerBinaryFromManifest / probeObserverBinary 改为共用接口。C Exam Kit 依赖同 Observer 分支，旧启动器兼容保留。ACCODING_MANAGED_V2=1 禁用运行时全局包发现。仅安装信息接口与依赖调整，不提前发布 Observer。

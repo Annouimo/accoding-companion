@@ -52,6 +52,8 @@ test("installed npm C99 data and per-question update preserve original code", as
   const previous=process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME=path.join(temp,"data");
   const previousPrefix = process.env.npm_config_prefix;
+  const previousLegacyOnly = process.env.ACCODING_PRESET_LEGACY_ONLY;
+  process.env.ACCODING_PRESET_LEGACY_ONLY = "1";
   process.env.npm_config_prefix = path.join(temp, "npm global");
   try {
     const root=path.join(temp,"course");
@@ -121,6 +123,8 @@ test("installed npm C99 data and per-question update preserve original code", as
     assert.match(undone, /\.accoding\/presets\/local-[a-f0-9]{64}\/expanded\.h/);
     assert.equal(undone.replace(/#include "[^"]+"/, '#include "exam.h"'), sourceCode);
   } finally {
+    if (previousLegacyOnly === undefined) delete process.env.ACCODING_PRESET_LEGACY_ONLY;
+    else process.env.ACCODING_PRESET_LEGACY_ONLY = previousLegacyOnly;
     if (previousPrefix === undefined) delete process.env.npm_config_prefix;
     else process.env.npm_config_prefix = previousPrefix;
     if(previous===undefined)delete process.env.XDG_DATA_HOME;
@@ -133,6 +137,8 @@ test("missing C99 package gives an actionable error while C++17 needs no preset"
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-no-preset-"));
   const previous = process.env.XDG_DATA_HOME;
   const previousPrefix = process.env.npm_config_prefix;
+  const previousLegacyOnly = process.env.ACCODING_PRESET_LEGACY_ONLY;
+  process.env.ACCODING_PRESET_LEGACY_ONLY = "1";
   process.env.npm_config_prefix = path.join(temp, "npm global");
   process.env.XDG_DATA_HOME = path.join(temp, "data");
   const app = new StandaloneWorkflow();
@@ -147,6 +153,8 @@ test("missing C99 package gives an actionable error while C++17 needs no preset"
     assert.equal(await app.activePreset(undefined, cppRoot), undefined);
   } finally {
     app.dispose();
+    if (previousLegacyOnly === undefined) delete process.env.ACCODING_PRESET_LEGACY_ONLY;
+    else process.env.ACCODING_PRESET_LEGACY_ONLY = previousLegacyOnly;
     if (previousPrefix === undefined) delete process.env.npm_config_prefix;
     else process.env.npm_config_prefix = previousPrefix;
     if (previous === undefined) delete process.env.XDG_DATA_HOME;
@@ -181,5 +189,24 @@ test("batch preset update uses source history and can recognize an unchanged gen
     assert.match(await fs.readFile(path.join(root, bindings[1].sourceFile), "utf8"), /0\.6\.5/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("npm dependency is preferred over a legacy launcher's incompatible resource path", async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), "accoding-npm-priority-"));
+  const previous = process.env.ACCODING_PRESET_PACKAGE;
+  try {
+    const example=path.resolve("scaffold/presets/example-c99");
+    await fs.cp(example,path.join(temp,"preset"),{recursive:true});
+    await fs.writeFile(path.join(temp,"package.json"),JSON.stringify({name:"@annouimo/c-exam-kit-preset",version:"0.7.0"}));
+    process.env.ACCODING_PRESET_PACKAGE=temp;
+    const found=await installedPresets();
+    assert.equal(found.length,1);
+    assert.match(found[0].version,/^0\.6\.(?:9|[1-9][0-9]+)$/);
+  } finally {
+    if (previous===undefined) delete process.env.ACCODING_PRESET_PACKAGE;
+    else process.env.ACCODING_PRESET_PACKAGE=previous;
+    await fs.rm(temp,{recursive:true,force:true});
   }
 });

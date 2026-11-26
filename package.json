@@ -31,7 +31,9 @@
     "prepack": "npm run build",
     "test:launcher": "node tests/standalone/launcher-smoke.mjs"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@annouimo/c-exam-kit-preset": "^0.6.9"
+  },
   "devDependencies": {
     "cheerio": "1.0.0",
     "markdown-it": "14.3.2",
