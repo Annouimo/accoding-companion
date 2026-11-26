@@ -22,3 +22,7 @@ Observer 2b9e6a3 已通过真实 Windows/Linux GDB、Linux LLDB 和四平台原�
 4. 实机审核通过后才决定稳定版发行及独立 Release；不把跨平台安装测试替代实机审核。不需要更改 C Exam Kit 版本。
 
 本次只生成审核产物，不合并主分支、不变更 npm 标签。npm 工作流手动触发及交互式 npm 认证须维护者完成。
+
+## 正式发行决定（最新，覆盖上述预览计划）
+
+维护者确认直接发行 Observer 0.1.0、Companion 0.2.8、Launcher 0.3.0；C Exam Kit 保持 0.6.10。最新数据优先 Observer 已合入 main（e042d440a054c7e51bdbe8c50a1a7c350c2dd345），候选测试改用此提交；正式依赖使用 ^0.1.0。先发布 Observer，再发布 Companion，最后发布 v2 Launcher ZIP。现有 v2 安装旧 latest 0.2.7 时因缺少 --installation-info 被拒绝；不是 npm 调用本身的证据。新增真实 npm 安装测试和更明确错误，正式 ZIP 发布必须通过实际 registry 安装。详见 [release.md](release.md)。旧预览计划仅保留历史记录。
