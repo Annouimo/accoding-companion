@@ -89,7 +89,10 @@ export async function prepareObservation(app: StandaloneWorkflow, problem: Resol
     const sourceName = path.basename(fresh.source);
     const userPath = path.join("user", sourceName);
     await fs.mkdir(path.join(dir,"user"));
-    await fs.writeFile(path.join(dir,"observe.c"),prepared.diagnosticCode,{mode:0o600});
+    const unmapped = prepared.diagnosticCode === "#line 1 " + JSON.stringify(sourceName) + "\n" + prepared.original;
+    // A plain C file already has the correct physical line numbers. Avoid a
+    // redundant SourceMap, which disables the current LLDB identity analysis.
+    if (!unmapped) await fs.writeFile(path.join(dir,"observe.c"),prepared.diagnosticCode,{mode:0o600});
     await fs.writeFile(path.join(dir,userPath),prepared.original,{mode:0o600});
     await fs.writeFile(path.join(dir,"sample.in"),input,{mode:0o600});
     if (expected !== undefined) await fs.writeFile(path.join(dir,"sample.out"),expected,{mode:0o600});
@@ -97,8 +100,8 @@ export async function prepareObservation(app: StandaloneWorkflow, problem: Resol
     const map = { [sourceName]: userPath, [path.join(workDir,sourceName)]: userPath, [path.join(dir,sourceName)]: userPath };
     const compiler = /[\\/]/.test(tc.c) && !path.isAbsolute(tc.c) ? path.resolve(tc.c) : tc.c;
     const session = {
-      schemaVersion: SESSION_SCHEMA, sourcePath: "observe.c", workDir,
-      visibleSourcePaths: [userPath], sourceMap: map, compiler,
+      schemaVersion: SESSION_SCHEMA, sourcePath: unmapped ? userPath : "observe.c", workDir,
+      ...(unmapped ? {} : { visibleSourcePaths: [userPath], sourceMap: map }), compiler,
       compilerArgs: tc.cLinkArgs ?? [], stdinFile: "sample.in",
       ...(expected === undefined ? {} : { expectedStdoutFile: "sample.out" })
     };

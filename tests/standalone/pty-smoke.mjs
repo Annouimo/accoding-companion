@@ -309,10 +309,11 @@ await scenario("observer owns terminal and returns to selected sample", async ct
   const sessionPath = (await fs.readFile(path.join(ctx.home,"observer-session"),"utf8")).trim();
   const data = JSON.parse(await fs.readFile(sessionPath,"utf8"));
   assert.equal(data.schemaVersion,1);
-  assert.equal(data.sourcePath,"observe.c");
+  assert.ok(data.sourcePath.startsWith("user/")); 
+  assert.equal(data.sourceMap,undefined);
   assert.equal(data.stdinFile,"sample.in");
   assert.ok(data.expectedStdoutFile);
-  assert.ok((await fs.readFile(path.join(path.dirname(sessionPath),data.visibleSourcePaths[0]),"utf8")).includes("unused_index"));
+  assert.ok((await fs.readFile(path.join(path.dirname(sessionPath),data.sourcePath),"utf8")).includes("unused_index"));
   ctx.send("return\n");
   await ctx.expect("OBSERVER_CHILD_EXIT");
   await ctx.expect("输出不符");
