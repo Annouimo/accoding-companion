@@ -10,6 +10,15 @@ on:
       - 'docs/launcher/**'
       - 'package.json'
   workflow_dispatch:
+    inputs:
+      companion_version:
+        description: 'Unpublished Companion prerelease; leave blank for rehearsal only'
+        required: false
+        type: string
+      observer_version:
+        description: 'Already published Observer next prerelease'
+        required: false
+        type: string
 permissions:
   contents: read
 jobs:
@@ -53,3 +62,28 @@ jobs:
         run: |
           npm install --ignore-scripts --no-audit --no-fund
           node scripts/verify-candidate-install.mjs "$RUNNER_TEMP/observer-private" "$RUNNER_TEMP/installed-candidate"
+
+  prepare-preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.companion_version != '' && inputs.observer_version != ''
+    needs: candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Prepare and install real preview package without publishing
+        env:
+          COMPANION_VERSION: ${{ inputs.companion_version }}
+          OBSERVER_VERSION: ${{ inputs.observer_version }}
+        run: node scripts/prepare-npm-preview.mjs "$COMPANION_VERSION" "$OBSERVER_VERSION" "$RUNNER_TEMP/companion-preview"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-reviewed-preview
+          path: |
+            ${{ runner.temp }}/companion-preview/*.tgz
+            ${{ runner.temp }}/companion-preview/SHA256SUMS
+          if-no-files-found: error
