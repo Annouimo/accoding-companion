@@ -112,6 +112,7 @@ test("installed npm C99 data and per-question update preserve original code", as
     const second = await store.import({ ...problem, target: { kind: "problemset", problemId: "321" } }, "B-Test");
     await fs.writeFile(path.join(root, second.sourceFile), updated);
     await fs.rm(global, { recursive: true });
+    await fs.rm(newGlobal, { recursive: true });
     await fs.rm(pkg, { recursive: true });
     const app = new StandaloneWorkflow();
     try {

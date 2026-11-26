@@ -49,7 +49,10 @@ async function globalPresets(): Promise<InstalledPreset[]> {
   }
   const managed = process.env.ACCODING_PRESET_PACKAGE;
   if (managed && path.isAbsolute(managed)) {
-    add(await readInstalledPreset(managed));
+    const candidate = await readInstalledPreset(managed);
+    // A legacy launcher's separately installed resource cannot override the
+    // declared dependency or introduce a newer incompatible minor version.
+    if (candidate && (found.length === 0 || /^0\.6\.(?:10|[1-9][0-9]+)$/.test(candidate.version))) add(candidate);
     return found;
   }
   let root: string;
