@@ -30,7 +30,7 @@ export function observerBinaryFromManifest(root: string, value: unknown, platfor
   return binary;
 }
 
-export async function probeObserverBinary(binary: string): Promise<{version?: string; sessionSchemaVersions?: number[]; backends?: string[]}> {
+export async function probeObserverBinary(binary: string): Promise<{version?: string; sessionSchemaVersions?: number[]; backends?: string[]; sessionFeatures?: string[]}> {
   if (!(await fs.stat(binary)).isFile()) throw new Error("找不到 C Observer 可执行文件。");
   const { stdout } = await exec(binary, ["--capabilities"], { timeout: 5000, maxBuffer: 65536, windowsHide: true });
   const capability = JSON.parse(stdout);

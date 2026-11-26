@@ -9,3 +9,5 @@ Observer 已快进到 Windows GDB 后端并接入正式 CLI；后续验证 Windo
 ## npm 11 兼容调整
 
 候选目录先实际 npm install/update（禁用 lifecycle scripts），再校验实际 CLI、组件状态、锁文件和版本差异。用户确认后不再访问 registry，也不重新解析依赖；复验锁摘要及 CLI 后一次切换。取消删除候选，不影响当前安装。保留缺失可选依赖的真实 registry 测试，改测正式采用的 staged install/update 流程；npm ci 旧方案在 npm 11 EUSAGE 已记录。待实际 CI 验证。
+
+Observer 能力接口可声明 sessionFeatures。Companion 仅在实际二进制声明支持时传入 backend=auto 和样例 comparison；旧 Session v1 严格解析器仍可使用。Windows CRLF 与样例规则的判定另显示，原始字节保留。新后端原生构建和真实 TUI CI 尚需通过。

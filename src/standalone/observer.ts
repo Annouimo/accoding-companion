@@ -12,7 +12,7 @@ const PACKAGE = "@routilet/c-observer";
 const LEGACY_PACKAGE = "@annouimo/c-observer";
 const SESSION_SCHEMA = 1;
 
-export async function resolveObserver(): Promise<string> {
+async function resolveObservationRuntime() {
   const override = process.env.ACCODING_OBSERVER_PATH;
   let binary: string;
   if (override) {
@@ -23,8 +23,12 @@ export async function resolveObserver(): Promise<string> {
     if (!manifest) throw new Error("未安装 C Observer。请更新 Companion；开发联调可指定 ACCODING_OBSERVER_PATH。");
     binary = observerBinaryFromManifest(path.dirname(manifest), JSON.parse(await fs.readFile(manifest,"utf8")));
   }
-  await probeObserverBinary(binary);
-  return binary;
+  const capabilities = await probeObserverBinary(binary);
+  return { binary, capabilities };
+}
+
+export async function resolveObserver(): Promise<string> {
+  return (await resolveObservationRuntime()).binary;
 }
 
 export interface ObserveSelection {
@@ -44,7 +48,7 @@ export interface PreparedObservation {
 // version. Freeze the original text from the same prepare call for #line mapping.
 export async function prepareObservation(app: StandaloneWorkflow, problem: ResolvedProblem, selection: ObserveSelection): Promise<PreparedObservation> {
   if (path.extname(problem.source).toLowerCase() !== ".c") throw new Error("C Observer 目前只支持 C 源文件。");
-  const binary = await resolveObserver();
+  const { binary, capabilities } = await resolveObservationRuntime();
   const fresh = await app.resolve(problem.source);
   if (fresh.binding.bindingId !== problem.binding.bindingId) throw new Error("题目绑定已变化，请重新选择。");
   const sample = selection.caseId === undefined ? undefined : fresh.binding.cases.find(c => c.id === selection.caseId && c.enabled);
@@ -72,8 +76,11 @@ export async function prepareObservation(app: StandaloneWorkflow, problem: Resol
     const workDir = path.dirname(fresh.source);
     const map = { [sourceName]: userPath, [path.join(workDir,sourceName)]: userPath, [path.join(dir,sourceName)]: userPath };
     const compiler = /[\\/]/.test(tc.c) && !path.isAbsolute(tc.c) ? path.resolve(tc.c) : tc.c;
+    const features = Array.isArray(capabilities.sessionFeatures) ? capabilities.sessionFeatures : [];
     const session = {
-      schemaVersion: SESSION_SCHEMA, sourcePath: unmapped ? userPath : "observe.c", workDir,
+      schemaVersion: SESSION_SCHEMA,
+      ...(features.includes("backend") ? { backend: "auto" } : {}),
+      ...(sample && features.includes("comparison") ? { comparison: sample.comparison } : {}), sourcePath: unmapped ? userPath : "observe.c", workDir,
       ...(unmapped ? {} : { visibleSourcePaths: [userPath], sourceMap: map }), compiler,
       compilerArgs: tc.cLinkArgs ?? [], stdinFile: "sample.in",
       ...(expected === undefined ? {} : { expectedStdoutFile: "sample.out" })
