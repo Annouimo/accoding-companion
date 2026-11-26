@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Accoding Companion launcher for macOS and Linux.
 set -euo pipefail
-CLI="@annouimo/accoding-companion"
-PRESET="@annouimo/c-exam-kit-preset"
+CLI="@routilet/accoding-companion"
+PRESET="@routilet/c-exam-kit-preset"
 mode=both
 yes=0
 launch=1
@@ -70,9 +70,12 @@ local_version() {
 }
 cli_entry="$global_root/$CLI/dist/accoding.mjs"
 manifest="$global_root/$PRESET/preset/manifest.json"
+legacy_cli="$global_root/@annouimo/accoding-companion/dist/accoding.mjs"
 start_companion() {
   if [[ "$launch" == 1 && "$mode" != preset && -f "$cli_entry" ]]; then
     exec node "$cli_entry"
+  elif [[ "$launch" == 1 && "$mode" != preset && -f "$legacy_cli" ]]; then
+    exec node "$legacy_cli"
   fi
 }
 needs_cli=0
@@ -84,7 +87,7 @@ if [[ "$mode" != preset ]]; then
       echo "Accoding Companion: $current_cli -> $newest_cli"
       needs_cli=1
     fi
-  elif [[ ! -f "$cli_entry" ]]; then
+  elif [[ ! -f "$cli_entry" && ! -f "$legacy_cli" ]]; then
     echo "Cannot download Accoding Companion. Check your connection and open the launcher again." >&2
     exit 1
   else
@@ -114,6 +117,11 @@ if ! confirm "Proceed with installation/update?"; then
   exit 0
 fi
 if [[ "$needs_cli" == 1 ]]; then
+  if [[ -f "$legacy_cli" && ! -f "$cli_entry" ]]; then
+    echo "The old global CLI owns the accoding command. Use the new native launcher, or run npm uninstall -g @annouimo/accoding-companion, then rerun this script." >&2
+    start_companion
+    exit 2
+  fi
   npm install --global --ignore-scripts --no-audit --no-fund "$CLI@$newest_cli"
   echo "Software installed: $(node "$cli_entry" --version)"
 fi

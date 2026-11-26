@@ -8,8 +8,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if ($SoftwareOnly -and $PresetOnly) { throw 'Choose only one component filter.' }
-$cliPackage = '@annouimo/accoding-companion'
-$presetPackage = '@annouimo/c-exam-kit-preset'
+$cliPackage = '@routilet/accoding-companion'
+$presetPackage = '@routilet/c-exam-kit-preset'
 $channel = if ($Next) { 'next' } else { 'latest' }
 
 function Confirm-Action([string]$Message) {
@@ -68,12 +68,16 @@ function Installed-Version([string]$Package) {
   return 'not installed'
 }
 
-$cliEntry = Join-Path $globalRoot '@annouimo\accoding-companion\dist\accoding.mjs'
-$manifest = Join-Path $globalRoot '@annouimo\c-exam-kit-preset\preset\manifest.json'
-$hasCli = Test-Path -LiteralPath $cliEntry -PathType Leaf
+$cliEntry = Join-Path $globalRoot '@routilet\accoding-companion\dist\accoding.mjs'
+$manifest = Join-Path $globalRoot '@routilet\c-exam-kit-preset\preset\manifest.json'
+$legacyCli = Join-Path $globalRoot '@annouimo\accoding-companion\dist\accoding.mjs'
+$hasCli = (Test-Path -LiteralPath $cliEntry -PathType Leaf) -or (Test-Path -LiteralPath $legacyCli -PathType Leaf)
 function Start-Companion {
   if (-not $NoLaunch -and -not $PresetOnly -and (Test-Path -LiteralPath $cliEntry -PathType Leaf)) {
     & node.exe $cliEntry
+    exit $LASTEXITCODE
+  } elseif (-not $NoLaunch -and -not $PresetOnly -and (Test-Path -LiteralPath $legacyCli -PathType Leaf)) {
+    & node.exe $legacyCli
     exit $LASTEXITCODE
   }
 }
@@ -111,6 +115,11 @@ if (-not (Confirm-Action 'Proceed with installation/update?')) {
   exit 0
 }
 if ($needsCli) {
+  if ((Test-Path -LiteralPath $legacyCli -PathType Leaf) -and -not (Test-Path -LiteralPath $cliEntry -PathType Leaf)) {
+    Write-Host "The old global CLI owns the accoding command. Use the new native launcher, or run npm uninstall -g @annouimo/accoding-companion, then rerun this script."
+    Start-Companion
+    exit 2
+  }
   & npm.cmd install --global --ignore-scripts --no-audit --no-fund "$cliPackage@$cliVersion"
   if ($LASTEXITCODE -ne 0) { throw 'CLI installation failed.' }
   Write-Host 'Accoding Companion software installed.'
