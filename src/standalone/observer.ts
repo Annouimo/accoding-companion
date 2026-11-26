@@ -8,7 +8,8 @@ import type { StandaloneWorkflow, ResolvedProblem } from "./workflow";
 
 const exec = promisify(execFile);
 const runtimeRequire = createNodeRequire(import.meta.url);
-const PACKAGE = "@annouimo/c-observer";
+const PACKAGE = "@routilet/c-observer";
+const LEGACY_PACKAGE = "@annouimo/c-observer";
 const SESSION_SCHEMA = 1;
 
 export function resolvePackageFile(name: string, file: string): string | undefined {
@@ -40,7 +41,7 @@ export async function resolveObserver(): Promise<string> {
     if (!path.isAbsolute(override)) throw new Error("ACCODING_OBSERVER_PATH 必须是绝对路径。");
     binary = override;
   } else {
-    const manifest = resolvePackageFile(PACKAGE, "manifest.json");
+    const manifest = resolvePackageFile(PACKAGE, "manifest.json") ?? resolvePackageFile(LEGACY_PACKAGE, "manifest.json");
     if (!manifest) throw new Error("未安装 C Observer。请更新 Companion；开发联调可指定 ACCODING_OBSERVER_PATH。");
     binary = observerBinaryFromManifest(path.dirname(manifest), JSON.parse(await fs.readFile(manifest,"utf8")));
   }

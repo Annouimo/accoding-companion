@@ -32,7 +32,7 @@
     "test:launcher": "node tests/standalone/launcher-smoke.mjs"
   },
   "dependencies": {
-    "@annouimo/c-exam-kit-preset": "^0.6.9"
+    "@routilet/c-exam-kit-preset": "^0.6.10"
   },
   "devDependencies": {
     "cheerio": "1.0.0",
