@@ -3,10 +3,10 @@ name: Publish npm stable release
 on:
   push:
     branches: [main]
-    paths: ['package.json', 'launcher/VERSION', '.github/workflows/publish-npm.yml', '.github/scripts/*release*.mjs']
+    paths: ['package.json', 'launcher/**', '.github/workflows/publish-npm.yml', '.github/scripts/*release*.mjs']
   pull_request:
     branches: [main]
-    paths: ['package.json', 'launcher/VERSION', '.github/workflows/publish-npm.yml', '.github/scripts/*release*.mjs']
+    paths: ['package.json', 'launcher/**', '.github/workflows/publish-npm.yml', '.github/scripts/*release*.mjs']
   workflow_dispatch:
     inputs:
       mode:
@@ -138,6 +138,7 @@ jobs:
     if: needs.plan.outputs.mode == 'DRY_RUN' || needs.plan.outputs.publish == 'true' || needs.plan.outputs.launcher == 'true'
     name: Verify launcher (${{ matrix.os }})
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -226,6 +227,7 @@ jobs:
     needs: [plan, pack, launcher, launcher-bundles, publish]
     if: always() && !cancelled() && github.ref == 'refs/heads/main' && needs.plan.result == 'success' && needs.plan.outputs.launcher == 'true' && needs.pack.result == 'success' && needs.launcher.result == 'success' && needs.launcher-bundles.result == 'success' && (needs.publish.result == 'success' || (needs.plan.outputs.publish == 'false' && needs.publish.result == 'skipped'))
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
