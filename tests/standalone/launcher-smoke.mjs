@@ -44,7 +44,7 @@ try {
     npm_config_cache: path.join(temp, "npm cache"), npm_config_registry: registry,
     NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1" };
   const cli = "@routilet/accoding-companion";
-  const preset = "@routilet/c-exam-kit-preset";
+  const preset = "@routilet/c-exam-kit";
   for (const [name, versions] of [[cli, ["0.2.0", "0.2.1"]], [preset, ["0.6.4"]]]) {
     const release = { latest: versions[0], versions: new Map() };
     packages.set(name, release);

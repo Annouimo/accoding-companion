@@ -91,11 +91,11 @@ test("installed npm C99 data and per-question update preserve original code", as
     await fs.writeFile(path.join(global, "package.json"),
       JSON.stringify({ name: "@annouimo/c-exam-kit-preset", version: "0.2.0" }));
     assert.deepEqual((await installedPresets()).map((entry) => entry.version), ["0.2.0"]);
-    const newGlobal = path.join(npmRoot, "@routilet", "c-exam-kit-preset");
+    const newGlobal = path.join(npmRoot, "@routilet", "c-exam-kit");
     await fs.mkdir(path.dirname(newGlobal), { recursive: true });
     await fs.cp(global, newGlobal, { recursive: true });
     await fs.writeFile(path.join(newGlobal, "package.json"),
-      JSON.stringify({ name: "@routilet/c-exam-kit-preset", version: "0.2.0" }));
+      JSON.stringify({ name: "@routilet/c-exam-kit", version: "0.2.0" }));
     const installed = await installedPresets();
     assert.deepEqual(installed.map((entry) => entry.version), ["0.2.0"]);
     await fs.writeFile(path.join(global, "package.json"),

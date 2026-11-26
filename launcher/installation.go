@@ -14,9 +14,12 @@ import (
 )
 
 const cliPackage = "@routilet/accoding-companion"
-const presetPackage = "@routilet/c-exam-kit-preset"
+const presetPackage = "@routilet/c-exam-kit"
 
 func legacyPackage(name string) string {
+	if name == presetPackage {
+		return "@annouimo/c-exam-kit-preset"
+	}
 	return strings.Replace(name, "@routilet/", "@annouimo/", 1)
 }
 

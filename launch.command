@@ -2,7 +2,7 @@
 # Accoding Companion launcher for macOS and Linux.
 set -euo pipefail
 CLI="@routilet/accoding-companion"
-PRESET="@routilet/c-exam-kit-preset"
+PRESET="@routilet/c-exam-kit"
 mode=both
 yes=0
 launch=1

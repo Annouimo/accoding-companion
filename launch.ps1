@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($SoftwareOnly -and $PresetOnly) { throw 'Choose only one component filter.' }
 $cliPackage = '@routilet/accoding-companion'
-$presetPackage = '@routilet/c-exam-kit-preset'
+$presetPackage = '@routilet/c-exam-kit'
 $channel = if ($Next) { 'next' } else { 'latest' }
 
 function Confirm-Action([string]$Message) {
@@ -69,7 +69,7 @@ function Installed-Version([string]$Package) {
 }
 
 $cliEntry = Join-Path $globalRoot '@routilet\accoding-companion\dist\accoding.mjs'
-$manifest = Join-Path $globalRoot '@routilet\c-exam-kit-preset\preset\manifest.json'
+$manifest = Join-Path $globalRoot '@routilet\c-exam-kit\preset\manifest.json'
 $legacyCli = Join-Path $globalRoot '@annouimo\accoding-companion\dist\accoding.mjs'
 $hasCli = (Test-Path -LiteralPath $cliEntry -PathType Leaf) -or (Test-Path -LiteralPath $legacyCli -PathType Leaf)
 function Start-Companion {
