@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -100,5 +103,45 @@ func TestLegacyScopeMigration(t *testing.T) {
 	}
 	if len(availableUpdates(dir, updateResult{cli: "1.2.3", preset: "1.2.3"})) != 1 {
 		t.Fatal("same-version namespace migration must be offered")
+	}
+}
+
+func TestRuntimeRenameRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err error
+		windows bool
+		failures int
+		wantCalls int
+		wantError bool
+	}{
+		{"access denied then succeeds", os.ErrPermission, true, 2, 3, false},
+		{"sharing violation", syscall.Errno(32), true, 1, 2, false},
+		{"lock violation", syscall.Errno(33), true, 1, 2, false},
+		{"permanent access denied", os.ErrPermission, true, 99, 8, true},
+		{"unexpected error", errors.New("disk error"), true, 1, 1, true},
+		{"non-Windows", os.ErrPermission, false, 1, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls, sleeps := 0, 0
+			err := retryRuntimeRename(func() error {
+				calls++
+				if calls <= tc.failures {
+					return &os.LinkError{Op: "rename", Old: "stage", New: "runtime", Err: tc.err}
+				}
+				return nil
+			}, func(d time.Duration) {
+				if d <= 0 || d > time.Second {
+					t.Fatalf("invalid retry delay: %v", d)
+				}
+				sleeps++
+			}, tc.windows)
+			if calls != tc.wantCalls || sleeps != calls-1 || (err != nil) != tc.wantError {
+				t.Fatalf("calls=%d sleeps=%d err=%v", calls, sleeps, err)
+			}
+			if tc.wantError && !errors.Is(err, tc.err) {
+				t.Fatalf("original error lost: %v", err)
+			}
+		})
 	}
 }
