@@ -1,0 +1,55 @@
+name: Verify integrated release candidate (no publishing)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-candidate.yml'
+      - 'scripts/**'
+      - 'launcher/**'
+      - 'src/**'
+      - 'docs/launcher/**'
+      - 'package.json'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: launcher/go.mod
+          cache-dependency-path: launcher/go.sum
+      - name: Inspect public npm tags (read only)
+        run: |
+          for pkg in @routilet/c-exam-kit @routilet/c-observer @routilet/accoding-companion; do
+            echo "=== $pkg ==="
+            npm view "$pkg" dist-tags --json --fetch-retries=0 --fetch-timeout=15000 || echo "Registry lookup failed: $pkg"
+          done
+      - name: Build independent v2 launcher ZIPs
+        run: bash scripts/package-launchers.sh "$RUNNER_TEMP/launcher-v2" --managed-v2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-v2-review-only
+          path: ${{ runner.temp }}/launcher-v2/*.zip
+          if-no-files-found: error
+      - name: Check out fixed Observer candidate
+        uses: actions/checkout@v4
+        with:
+          repository: Routilet/c-observer
+          ref: 2b9e6a30d03bb72a2eab9d853bddbfabe6c64309
+          path: observer-candidate
+          persist-credentials: false
+      - name: Build private Observer tarball
+        working-directory: observer-candidate
+        run: node scripts/package-preview.mjs 0.1.0-dev.1 "$RUNNER_TEMP/observer-private"
+      - name: Build and verify installed private Companion tarball
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          node scripts/verify-candidate-install.mjs "$RUNNER_TEMP/observer-private" "$RUNNER_TEMP/installed-candidate"
