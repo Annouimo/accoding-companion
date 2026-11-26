@@ -42,6 +42,7 @@ func (r *fakeRunner) NPM(_ context.Context, dir string, args ...string) ([]byte,
 	return nil, errors.New("unexpected npm command")
 }
 func (r *fakeRunner) CLI(_ context.Context, dir string, args ...string) ([]byte, error) {
+	if r.fail { return nil, errors.New("simulated verification failure") }
 	raw, e := os.ReadFile(filepath.Join(dir, "package-lock.json"))
 	if e != nil {
 		return nil, e

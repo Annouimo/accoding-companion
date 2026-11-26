@@ -63,6 +63,7 @@ type Candidate struct {
 	digest  [32]byte
 	version string
 	Changes []Change
+	Info Info
 }
 
 func (m Manager) dir() (string, error) {
@@ -185,8 +186,10 @@ func writeJSON(file string, value any) error {
 	return os.WriteFile(file, append(b, '\n'), 0600)
 }
 
-// Plan only resolves the candidate in a private directory. Caller must Close
-// a canceled candidate. The UI must show Changes before asking for approval.
+// Plan installs a complete candidate in a private directory. npm install/update
+// tolerate absent optional dependencies on npm 10 and 11 where npm ci can
+// reject a lock without their metadata. No activation occurs until approval.
+// Caller must Close a canceled candidate.
 func (m Manager) Plan(ctx context.Context, version string) (*Candidate, error) {
 	dir, err := m.dir()
 	if err != nil {
@@ -236,18 +239,20 @@ func (m Manager) Plan(ctx context.Context, version string) (*Candidate, error) {
 	if err = writeJSON(filepath.Join(stage, "package.json"), pkg); err != nil {
 		return nil, err
 	}
-	if _, err = m.Runner.NPM(ctx, stage, "install", "--package-lock-only", "--prefer-online"); err != nil {
+	if _, err = m.Runner.NPM(ctx, stage, "install", "--prefer-online"); err != nil {
 		return nil, err
 	}
-	if _, err = m.Runner.NPM(ctx, stage, "update", "--package-lock-only", "--save", "--prefer-online"); err != nil {
+	if _, err = m.Runner.NPM(ctx, stage, "update", "--save", "--prefer-online"); err != nil {
 		return nil, err
 	}
 	next, raw, err := readLock(stage, version)
 	if err != nil {
 		return nil, err
 	}
+	info, err := verify(ctx, m.Runner, stage, version)
+	if err != nil { return nil, err }
 	keep = true
-	return &Candidate{manager: m, stage: stage, free: free, base: base, digest: sha256.Sum256(raw), version: version, Changes: differences(previous, next)}, nil
+	return &Candidate{manager: m, stage: stage, free: free, base: base, digest: sha256.Sum256(raw), version: version, Info: info, Changes: differences(previous, next)}, nil
 }
 func (c *Candidate) Close() error {
 	if c == nil {
@@ -312,7 +317,7 @@ func writeState(dir string, s Activation) error {
 	return os.Rename(file.Name(), filepath.Join(dir, "activation.json"))
 }
 
-// Commit installs exactly the reviewed lock, verifies the actual CLI, and
+// Commit verifies exactly the reviewed staged tree and actual CLI, and
 // swaps one activation record. A stale plan never replaces a newer install.
 // No historical release is deleted here: cleanup needs running-process leases.
 func (c *Candidate) Commit(ctx context.Context) (Info, error) {
@@ -343,16 +348,6 @@ func (c *Candidate) Commit(ctx context.Context) (Info, error) {
 	}
 	if sha256.Sum256(raw) != c.digest {
 		return info, errors.New("candidate lock changed")
-	}
-	if _, err = m.Runner.NPM(ctx, c.stage, "ci"); err != nil {
-		return info, err
-	}
-	_, raw, err = readLock(c.stage, c.version)
-	if err != nil {
-		return info, err
-	}
-	if sha256.Sum256(raw) != c.digest {
-		return info, errors.New("installed lock changed")
 	}
 	info, err = verify(ctx, m.Runner, c.stage, c.version)
 	if err != nil {

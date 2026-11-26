@@ -49,17 +49,17 @@ try {
   const run=async(...args)=>{const r=await runNpm(args,opts);console.log('npm',args.join(' '),r.stdout.trim());return r;};
   const lock=async()=>JSON.parse(await fs.readFile(path.join(install,'package-lock.json'),'utf8'));
   const ver=async(name)=>(await lock()).packages['node_modules/'+name]?.version;
-  await run('install','--package-lock-only');await run('ci');
+  await run('install');
   assert.equal(await ver(resource),'0.6.9');assert.equal(await ver(observer),'0.1.0-beta.1');
   await assert.rejects(fs.access(path.join(install,'node_modules',missing,'package.json')), {code:'ENOENT'});
   await assert.rejects(fs.access(path.join(install,'node_modules',resource,'unexpected-install-script')), {code:'ENOENT'});
   await add(resource,'0.6.10');await add(resource,'0.7.0');await add(observer,'0.1.0-beta.2',{}, {},'next');
-  await run('update','--package-lock-only','--save');
+  await run('update','--save');
   assert.equal(await ver(app),'0.2.8');assert.equal(await ver(resource),'0.6.10');assert.equal(await ver(observer),'0.1.0-beta.1');
-  await run('ci');assert.equal(JSON.parse(await fs.readFile(path.join(install,'node_modules',resource,'package.json'),'utf8')).version,'0.6.10');
+  assert.equal(JSON.parse(await fs.readFile(path.join(install,'node_modules',resource,'package.json'),'utf8')).version,'0.6.10');
   await add(app,'0.2.9-beta.1',{[resource]:'^0.6.9'},{[observer]:'0.1.0-beta.2'},'next');
   await fs.writeFile(path.join(install,'package.json'),JSON.stringify({name:'managed',private:true,dependencies:{[app]:'0.2.9-beta.1'}}));
   await run('install','--package-lock-only');await run('update','--package-lock-only','--save');await run('ci');
   assert.equal(await ver(app),'0.2.9-beta.1');assert.equal(await ver(observer),'0.1.0-beta.2');
-  console.log('PASS: exact root and preview dependency, indirect compatible update, incompatible latest rejected, optional missing, lock-only + ci');
+  console.log('PASS: exact root and preview dependency, indirect compatible update, incompatible latest rejected, optional missing, staged install + update');
 } finally {server.close();await fs.rm(root,{recursive:true,force:true});}

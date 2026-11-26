@@ -165,7 +165,7 @@ func updateV2(root, channel string, r nodeRuntime) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	progress(3, "解析兼容依赖")
+	progress(3, "解析并暂存安装兼容依赖（尚未启用）")
 	candidate, err := m.Plan(ctx, version)
 	if err != nil {
 		return "", err
@@ -195,12 +195,16 @@ func updateV2(root, channel string, r nodeRuntime) (string, error) {
 		}
 		lines = append(lines, name+"  "+before+" → "+after+note)
 	}
+	lines = append(lines, "\n实际暂存组件：")
+	for _, component := range candidate.Info.Components {
+		lines = append(lines, component.Name+" "+component.Version+" · "+component.Status)
+	}
 	lines = append(lines, "\n不会修改课程文件及历史资源快照。")
 	choice, err := chooseV2(v2Menu{title: "更新 Accoding", status: strings.Join(lines, "\n"), options: []v2Option{{"cancel", "取消"}, {"apply", "确认安装 / 更新"}}})
 	if err != nil || choice != "apply" {
 		return "已取消，保留原安装。", err
 	}
-	progress(4, "安装锁定依赖并验证")
+	progress(4, "验证已确认的暂存安装")
 	info, err := candidate.Commit(ctx)
 	if err != nil {
 		return "", err
