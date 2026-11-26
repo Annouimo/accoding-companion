@@ -52,7 +52,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Routilet/c-observer
-          ref: 2b9e6a30d03bb72a2eab9d853bddbfabe6c64309
+          ref: e042d440a054c7e51bdbe8c50a1a7c350c2dd345
           path: observer-candidate
           persist-credentials: false
       - name: Build private Observer tarball
