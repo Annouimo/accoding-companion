@@ -184,20 +184,17 @@ import { stripVTControlCharacters } from "node:util";
   `], { env, stdio: "inherit" });
 }
 
-await scenario("missing compiler opens the local HTML guide only after a test request", async ctx => {
+await scenario("missing compiler reports local guidance without opening a browser", async ctx => {
   await ctx.expect("❯ 运行样例");
   const marker = path.join(ctx.home, "compiler-guide-opened");
   await assert.rejects(fs.access(marker));
   ctx.send("\r");
   await ctx.expect("未找到 C 编译器");
   await ctx.expect("编译环境配置");
-  for (let i = 0; i < 50; i++) {
-    if (await fs.access(marker).then(() => true, () => false)) break;
-    await delay(40);
-  }
-  const opened = (await fs.readFile(marker, "utf8")).trim();
-  assert.equal(opened, path.resolve("docs/launcher/编译环境配置.html"));
-  await fs.access(opened);
+  await ctx.expect("PATH");
+  await delay(200);
+  await assert.rejects(fs.access(marker), {code:"ENOENT"});
+  await fs.access(path.resolve("docs/launcher/编译环境配置.html"));
   ctx.send("q");
 }, env => {
   prepareSampleCourse(env);
