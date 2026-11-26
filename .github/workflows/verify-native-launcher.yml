@@ -96,7 +96,7 @@ jobs:
         with:
           go-version-file: launcher/go.mod
           cache-dependency-path: launcher/go.sum
-      - run: bash scripts/package-launchers.sh "$RUNNER_TEMP/launcher-dist"
+      - run: bash scripts/package-launchers.sh "$RUNNER_TEMP/launcher-dist" --managed-v2
       - uses: actions/upload-artifact@v4
         with:
           name: native-launchers

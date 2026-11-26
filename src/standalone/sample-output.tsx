@@ -132,21 +132,32 @@ function wrapText(text: string, width: number) {
   return lines;
 }
 
-export function SampleOutput({ report, onBack }: { report: SampleTestReport; onBack: () => void }) {
+export interface SampleOutputState {
+  selected: number;
+  diagnosticIndex: number;
+  view: View;
+  positions: Record<string, Position>;
+}
+export function SampleOutput({ report, onBack, initial, onObserve, observationError }: {
+  report: SampleTestReport; onBack: () => void;
+  initial?: SampleOutputState;
+  onObserve?: (entry: SampleCaseReport, state: SampleOutputState) => void;
+  observationError?: string;
+}) {
   const cases = report.kind === "samples" ? report.cases : [];
   const diagnostics = report.diagnostics ?? (report.kind === "compile" ? parseCompilerDiagnostics(report.output) : []);
   const firstFailure = cases.findIndex(entry => entry.status !== "PASS");
-  const [selected, setSelected] = useState(Math.max(0, firstFailure));
-  const [diagnosticIndex, setDiagnosticIndex] = useState(0);
+  const [selected, setSelected] = useState(initial?.selected ?? Math.max(0, firstFailure));
+  const [diagnosticIndex, setDiagnosticIndex] = useState(initial?.diagnosticIndex ?? 0);
   const hasLogs = cases.some(c => c.stderr || !["PASS", "FAIL"].includes(c.status));
   const views: View[] = [
     ...(cases.length ? ["sample" as const] : []),
     ...(diagnostics.length ? ["diagnostic" as const] : []),
     ...(hasLogs ? ["log" as const] : [])
   ];
-  const [view, setView] = useState<View>(report.kind === "compile" ? "diagnostic" :
-    firstFailure >= 0 && !["PASS", "FAIL"].includes(cases[firstFailure].status) ? "log" : "sample");
-  const [positions, setPositions] = useState<Record<string, Position>>({});
+  const [view, setView] = useState<View>(initial?.view ?? (report.kind === "compile" ? "diagnostic" :
+    firstFailure >= 0 && !["PASS", "FAIL"].includes(cases[firstFailure].status) ? "log" : "sample"));
+  const [positions, setPositions] = useState<Record<string, Position>>(initial?.positions ?? {});
   const keyName = view + ":" + (view === "diagnostic" ? diagnosticIndex : selected);
   const position = positions[keyName] ?? {};
   const update = (patch: Position) => setPositions(old => ({...old, [keyName]: {...old[keyName], ...patch}}));
@@ -198,8 +209,8 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
   const horizontalStep = Math.max(1, contentWidth - 2);
   const first = differences[0] ?? 0;
   const anchor = position.anchor ?? first;
-  const initial = table ? Math.max(0, first - Math.min(2, height - 1)) : 0;
-  const start = Math.min(position.top ?? initial, maxTop);
+  const initialTop = table ? Math.max(0, first - Math.min(2, height - 1)) : 0;
+  const start = Math.min(position.top ?? initialTop, maxTop);
   const end = Math.min(start + height, total);
   const offsetFor = (index: number) => {
     const pair = rowParts(expected, actual, index);
@@ -209,6 +220,9 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
   const offset = position.offset ?? (table && differences.length ? offsetFor(first) : 0);
   useInput((char, key) => {
     if (key.escape || (key.ctrl && char === "c")) { onBack(); return; }
+    if (!key.ctrl && !key.meta && char.toLowerCase() === "o" && entry && view !== "diagnostic" && onObserve) {
+      onObserve(entry, { selected, diagnosticIndex, view, positions }); return;
+    }
     if (key.tab && views.length) {
       setView(views[(views.indexOf(view) + views.length + (key.shift ? -1 : 1)) % views.length]);
       return;
@@ -253,7 +267,8 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
     entry ? entry.name + " · " + outcome(entry) + " · " + (selected + 1) + "/" + cases.length +
       (table ? " · " + differences.length + (entry.comparison === "tokens" ? " 项" : " 行") + "差异" : "") : "";
   const range = total ? "显示 " + (start + 1) + "–" + end + " / " + total : "";
-  const footer = "Esc 返回 · Tab 视图 · [ ] 切换 · ↑↓←→ 滚动" +
+  const observeHint = onObserve && entry && view !== "diagnostic" ? "O 观察当前源码 · " : "";
+  const footer = observeHint + "Esc 返回 · Tab 视图 · [ ] 切换 · ↑↓←→ 滚动" +
     (table ? " · N/P 差异" : view === "diagnostic" && diagnostic?.explanation ? " · Enter 原文" : "");
   const numberTitle = entry?.comparison === "tokens" ? "序号" : "行号";
   const padCell = (text: string, cells: number) => text + " ".repeat(Math.max(0, cells - stringWidth(text)));
@@ -290,8 +305,8 @@ export function SampleOutput({ report, onBack }: { report: SampleTestReport; onB
       </Text>;
     })}
     </Box>
-    <Text dimColor wrap="truncate-end">{windowOf(range + (offset ? " · 横向 " + (offset + 1) : "") +
+    <Text dimColor wrap="truncate-end">{windowOf(observationError ? "观察失败：" + terminalText(observationError) : range + (offset ? " · 横向 " + (offset + 1) : "") +
       (table && differences.length ? " · 差异 " + (differences.indexOf(anchor)+1) + "/" + differences.length : ""), width)}</Text>
-    <Text dimColor wrap="truncate-end">{windowOf(compact ? "Esc 返回 Tab 视图 [] ↑↓←→" + (table ? " N/P" : view==="diagnostic" && diagnostic?.explanation ? " Enter" : "") : footer, width)}</Text>
+    <Text dimColor wrap="truncate-end">{windowOf(compact ? observeHint + "Esc 返回 Tab 视图 [] ↑↓←→" + (table ? " N/P" : view==="diagnostic" && diagnostic?.explanation ? " Enter" : "") : footer, width)}</Text>
   </Box>;
 }

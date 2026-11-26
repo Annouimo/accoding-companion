@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -41,7 +42,9 @@ func (r nodeRuntime) valid() bool {
 	if !isFile(r.node) || !isFile(r.npm) {
 		return false
 	}
-	output, err := exec.Command(r.node, "-p", "process.versions.node").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, r.node, "-p", "process.versions.node").Output()
 	if err != nil {
 		return false
 	}
@@ -51,7 +54,11 @@ func (r nodeRuntime) valid() bool {
 	}
 	major, _ := strconv.Atoi(parts[0])
 	minor, _ := strconv.Atoi(parts[1])
-	return major > 22 || major == 22 && minor >= 12
+	if !(major > 22 || major == 22 && minor >= 12) {
+		return false
+	}
+	output, err = exec.CommandContext(ctx, r.node, r.npm, "--version").Output()
+	return err == nil && strings.TrimSpace(string(output)) != ""
 }
 
 func (r nodeRuntime) latest(name string) (string, error) {

@@ -43,6 +43,18 @@ func TestManagedRuntimeFromChinesePath(t *testing.T) {
 	if err != nil || next != r {
 		t.Fatalf("could not rediscover Node.js without restarting: %v", err)
 	}
+	t.Run("v2-real-npm-local-registry", func(t *testing.T) {
+		exerciseLocalRegistry(t, r, filepath.Join(root, "npm integration"))
+	})
+	if version := os.Getenv("ACCODING_TEST_PUBLISHED_VERSION"); version != "" {
+		t.Run("v2-published-registry", func(t *testing.T) {
+			observer := os.Getenv("ACCODING_TEST_PUBLISHED_OBSERVER")
+			if observer == "" {
+				t.Fatal("missing expected published Observer version")
+			}
+			exercisePublishedRegistry(t, r, filepath.Join(root, "published installation"), version, observer)
+		})
+	}
 }
 
 func TestInstalledMenuOnlyShowsAvailableActions(t *testing.T) {

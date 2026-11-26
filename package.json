@@ -1,6 +1,6 @@
 {
   "name": "@routilet/accoding-companion",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Non-official Accoding companion for C/C++ coursework",
   "type": "module",
   "private": true,
@@ -31,7 +31,9 @@
     "prepack": "npm run build",
     "test:launcher": "node tests/standalone/launcher-smoke.mjs"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@routilet/c-exam-kit": "^0.6.10"
+  },
   "devDependencies": {
     "cheerio": "1.0.0",
     "markdown-it": "14.3.2",
@@ -64,5 +66,8 @@
   "homepage": "https://github.com/Routilet/accoding-companion#readme",
   "bugs": {
     "url": "https://github.com/Routilet/accoding-companion/issues"
+  },
+  "optionalDependencies": {
+    "@routilet/c-observer": "^0.1.0"
   }
 }
