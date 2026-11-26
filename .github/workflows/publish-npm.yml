@@ -55,7 +55,7 @@ jobs:
           const file="package.json";
           const pkg=JSON.parse(fs.readFileSync(file,"utf8"));
           if(pkg.name!=="@annouimo/accoding-companion") throw Error("Unexpected package name");
-          if(pkg.repository?.url!=="git+https://github.com/Annouimo/accoding-companion.git") throw Error("GitHub provenance repository mismatch");
+          if(pkg.repository?.url!=="git+https://github.com/Routilet/accoding-companion.git") throw Error("GitHub provenance repository mismatch");
           if(pkg.version!==process.env.EXPECTED_VERSION || !/^\d+\.\d+\.\d+$/.test(pkg.version)) throw Error("Expected version mismatch or not a stable version");
           delete pkg.private; // Only the runner copy becomes publishable.
           fs.writeFileSync(file,JSON.stringify(pkg,null,2)+"\n");

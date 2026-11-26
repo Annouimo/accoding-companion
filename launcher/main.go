@@ -128,7 +128,7 @@ func (m menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m menu) View() string {
 	var view strings.Builder
 	fmt.Fprintln(&view, "Accoding 启动器  v"+launcherVersion)
-	fmt.Fprintln(&view, "Annouimo · https://github.com/Annouimo/accoding-companion")
+	fmt.Fprintln(&view, "Routilet · Designed by Annouimo\nhttps://github.com/Routilet/accoding-companion")
 	fmt.Fprintln(&view)
 	fmt.Fprintln(&view, m.status)
 	for _, update := range m.updates {

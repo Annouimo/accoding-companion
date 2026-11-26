@@ -25,9 +25,9 @@
 涉及新资源格式时，以 0.2.6 / 0.6.9 为例：
 
 1. 确认目标提交已合入 main，所有必要回归测试通过。HTML 定稿必须经过用户认可。
-2. 在 Companion 的 [Publish npm stable release](https://github.com/Annouimo/accoding-companion/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.2.6`。如只检查构建则使用 `DRY_RUN`。
+2. 在 Companion 的 [Publish npm stable release](https://github.com/Routilet/accoding-companion/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.2.6`。如只检查构建则使用 `DRY_RUN`。
 3. 验证 `npm view @annouimo/accoding-companion@latest version` 已返回 0.2.6。
-4. 在 C Exam Kit 的 [Publish npm stable release](https://github.com/Annouimo/c-exam-kit/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.6.9`。
+4. 在 C Exam Kit 的 [Publish npm stable release](https://github.com/Routilet/c-exam-kit/actions/workflows/publish-npm.yml) 工作流选择 main、`PUBLISH_LATEST`、`expected_version=0.6.9`。
 5. 验证 `npm view @annouimo/c-exam-kit-preset@latest version` 已返回 0.6.9。npm 的版本验证未完成时不要抢先发布启动器。
 6. 回到 Companion 发布工作流选择 main、`PUBLISH_LAUNCHERS`、`expected_version=0.2.6`、`expected_preset_version=0.6.9`。工作流将核对两个 npm latest 版本后创建 GitHub Release 并上传四个 ZIP。
 7. 检查下载入口与版本号，解压后做实际首次安装和启动验收。
@@ -43,3 +43,7 @@ PR 的 Verify native launcher and external compilers 工作流在 CLI 测试通�
 ### 仅发布 Companion（0.2.7）
 
 资源格式未变，不发布 C Exam Kit。先在 main 以 `PUBLISH_LATEST`、`expected_version=0.2.7` 发布 CLI，确认 npm latest 已更新后查询 `npm view @annouimo/c-exam-kit-preset@latest version`，再以 `PUBLISH_LAUNCHERS`、`expected_version=0.2.7`、`expected_preset_version=<实际 latest>` 发布启动器。版本说明见 [0.2.7](releases/0.2.7.md)。继续使用人工触发，不改变发布授权机制。
+
+## Routilet 仓库迁移后的发布前检查
+
+保留现有 `@annouimo` npm 包名。发布前在 npm 的两个包设置中核查 Trusted Publishing：GitHub owner 为 `Routilet`，仓库分别为 `accoding-companion`、`c-exam-kit`，工作流为 `publish-npm.yml`；如设置了 environment，须与实际工作流一致。先运行 DRY_RUN，确认通过后再由维护者显式触发正式发布。迁移不单独发版。

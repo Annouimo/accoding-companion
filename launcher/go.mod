@@ -1,4 +1,4 @@
-module github.com/Annouimo/accoding-companion/launcher
+module github.com/Routilet/accoding-companion/launcher
 
 go 1.24.9
 

@@ -2,7 +2,11 @@
 
 独立的、**非官方** Accoding 命令行／终端编程助手。用于导入课程比赛、管理 C / C++ 源码、本地评测及提交到 OJ。此项目与 Accoding、北航没有官方隶属关系。
 
-> 正式发行包见 [GitHub Releases](https://github.com/Annouimo/accoding-companion/releases/latest)。
+所属组织：[Routilet](https://github.com/Routilet) · 原始设计者：Annouimo。
+
+相关项目：[C Exam Kit](https://github.com/Routilet/c-exam-kit) 提供版本化函数资源；[C Observer](https://github.com/Routilet/c-observer) 正在开发独立运行观察功能，尚未集成。
+
+> 正式发行包见 [GitHub Releases](https://github.com/Routilet/accoding-companion/releases/latest)。
 
 ## 产品设计
 
@@ -49,7 +53,7 @@ node dist/accoding.mjs status --watch
 
 ## 安装和启动
 
-从 [最新发布页](https://github.com/Annouimo/accoding-companion/releases/latest) 下载对应平台的启动包并完整解压。Windows 双击 `Accoding Launcher.exe`，macOS 双击 `Accoding Launcher.command`。首次先选「安装」，完成后选「启动」。使用说明 HTML 随包提供，首次启动时打开。Linux 可使用下面的 npm 命令。
+从 [最新发布页](https://github.com/Routilet/accoding-companion/releases/latest) 下载对应平台的启动包并完整解压。Windows 双击 `Accoding Launcher.exe`，macOS 双击 `Accoding Launcher.command`。首次先选「安装」，完成后选「启动」。使用说明 HTML 随包提供，首次启动时打开。Linux 可使用下面的 npm 命令。
 
 函数手册随 C Exam Kit preset 0.6.6 起提供。按 H 在 Companion 中打开对应版本的函数速查。新版速查按操作分类浏览；`/` 搜索函数名或中文用途，Tab / Shift+Tab 切换类型，C 复制当前完整示例，R 跳转相关条目，U 查看使用约定，G 返回首页，H 关闭并保留阅读位置。旧版资源仍可阅读，但不一定提供全部结构化字段。新版资源只分发程序内速查数据，旧工作区可以继续阅读已保存的 Markdown 手册。
 
