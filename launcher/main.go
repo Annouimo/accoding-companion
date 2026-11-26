@@ -72,12 +72,18 @@ func checkUpdates() tea.Msg {
 }
 
 func availableUpdates(current string, release updateResult) []string {
+	if legacyInstallation(current) {
+		if canMigrate(current, release) {
+			return []string{"Routilet: 迁移到新发行包"}
+		}
+		return nil
+	}
 	var updates []string
 	for _, pkg := range []struct{ name, label, latest string }{
 		{cliPackage, "Companion", release.cli},
 		{presetPackage, "C Exam Kit", release.preset},
 	} {
-		old := versionOf(current, pkg.name)
+		old := installedVersion(current, pkg.name)
 		if newerVersion(pkg.latest, old) {
 			updates = append(updates, pkg.label+": "+old+" → "+pkg.latest)
 		}
@@ -128,7 +134,7 @@ func (m menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m menu) View() string {
 	var view strings.Builder
 	fmt.Fprintln(&view, "Accoding 启动器  v"+launcherVersion)
-	fmt.Fprintln(&view, "Annouimo · https://github.com/Annouimo/accoding-companion")
+	fmt.Fprintln(&view, "Routilet · Designed by Annouimo\nhttps://github.com/Routilet/accoding-companion")
 	fmt.Fprintln(&view)
 	fmt.Fprintln(&view, m.status)
 	for _, update := range m.updates {
@@ -188,7 +194,10 @@ func run() error {
 	for {
 		status := "尚未安装"
 		if current != "" {
-			status = "已安装  Companion " + versionOf(current, cliPackage) + " · C Exam Kit " + versionOf(current, presetPackage)
+			status = "已安装  Companion " + installedVersion(current, cliPackage) + " · C Exam Kit " + installedVersion(current, presetPackage)
+			if legacyInstallation(current) {
+				status += "（旧发行包）"
+			}
 		}
 		result, err := tea.NewProgram(menu{current: current, options: menuOptions(current != "", nil),
 			action: -1, status: status, note: note}, tea.WithAltScreen()).Run()
@@ -202,14 +211,14 @@ func run() error {
 		note = ""
 		switch chosen.action {
 		case installAction, updateAction:
-			oldPreset := versionOf(current, presetPackage)
+			oldPreset := installedVersion(current, presetPackage)
 			newPath, err := install(root, current, chosen.release)
 			if err != nil {
 				pause("安装或更新失败：" + err.Error())
 				continue
 			}
 			current = newPath
-			preset := versionOf(current, presetPackage)
+			preset := installedVersion(current, presetPackage)
 			if chosen.action == updateAction && oldPreset != preset {
 				promptWorkspaceUpdate(root, current, preset)
 			}
@@ -265,9 +274,9 @@ func companion(root, installed string, args ...string) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
-	entry := filepath.Join(packagePath(installed, cliPackage), "dist", "accoding.mjs")
+	entry := filepath.Join(packagePath(installed, activePackage(installed, cliPackage)), "dist", "accoding.mjs")
 	cmd := exec.Command(node.node, append([]string{entry}, args...)...)
-	cmd.Env = append(os.Environ(), "ACCODING_PRESET_PACKAGE="+packagePath(installed, presetPackage))
+	cmd.Env = append(os.Environ(), "ACCODING_PRESET_PACKAGE="+packagePath(installed, activePackage(installed, presetPackage)))
 	return cmd, nil
 }
 

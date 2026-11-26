@@ -43,8 +43,8 @@ try {
   const env = { ...process.env, npm_config_prefix: path.join(temp, "global prefix"),
     npm_config_cache: path.join(temp, "npm cache"), npm_config_registry: registry,
     NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1" };
-  const cli = "@annouimo/accoding-companion";
-  const preset = "@annouimo/c-exam-kit-preset";
+  const cli = "@routilet/accoding-companion";
+  const preset = "@routilet/c-exam-kit";
   for (const [name, versions] of [[cli, ["0.2.0", "0.2.1"]], [preset, ["0.6.4"]]]) {
     const release = { latest: versions[0], versions: new Map() };
     packages.set(name, release);

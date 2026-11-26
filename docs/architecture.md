@@ -47,7 +47,7 @@ Ink 界面保持挂载，页面状态与面包屑共享课程、作业和题目�
 - macOS/Linux：`$XDG_CONFIG_HOME/accoding-companion/`，默认 `~/.config/accoding-companion/`
 - Windows：`%APPDATA%\accoding-companion\`
 
-安装器与应用通过 `npm root --global` 使用同一个全局 npm 目录。课程所用组件保存在工作区内。以下旧目录只用于兼容已有安装：
+原生启动器使用独立的 npm 安装目录，通过 ACCODING_PRESET_PACKAGE 指定资源包；直接 npm 安装时，通过 `npm root --global` 发现新 `@routilet` 和旧 `@annouimo` 资源包。课程所用组件保存在工作区内。以下旧目录只用于兼容已有安装：
 
 - macOS：`~/Library/Application Support/Accoding Companion/presets/<version>`
 - Windows：`%LOCALAPPDATA%\Accoding Companion\presets\<version>`

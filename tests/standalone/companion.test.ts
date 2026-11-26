@@ -8,7 +8,7 @@ import { courseSettings } from "../../src/standalone/workspaces";
 import { migrateLegacyWorkspace } from "../../src/standalone/migrate";
 import { execFileSync } from "node:child_process";
 import { installedPresets, setCoursePresetVersion, applyPresetVersion, undoPresetUpdate,
-  chooseUpdateTargets, presetInclude, saveSharedPreset } from "../../src/standalone/preset-manager";
+  chooseUpdateTargets, presetInclude, saveSharedPreset, presetForVersion } from "../../src/standalone/preset-manager";
 import { loadPreset, renderHeader } from "../../src/standalone/scaffold";
 import { StandaloneWorkflow, toolchain } from "../../src/standalone/workflow";
 import { cTemplate } from "../../src/workspace/sources";
@@ -90,8 +90,19 @@ test("installed npm C99 data and per-question update preserve original code", as
     await fs.cp(pkg, global, { recursive: true });
     await fs.writeFile(path.join(global, "package.json"),
       JSON.stringify({ name: "@annouimo/c-exam-kit-preset", version: "0.2.0" }));
+    assert.deepEqual((await installedPresets()).map((entry) => entry.version), ["0.2.0"]);
+    const newGlobal = path.join(npmRoot, "@routilet", "c-exam-kit");
+    await fs.mkdir(path.dirname(newGlobal), { recursive: true });
+    await fs.cp(global, newGlobal, { recursive: true });
+    await fs.writeFile(path.join(newGlobal, "package.json"),
+      JSON.stringify({ name: "@routilet/c-exam-kit", version: "0.2.0" }));
     const installed = await installedPresets();
     assert.deepEqual(installed.map((entry) => entry.version), ["0.2.0"]);
+    await fs.writeFile(path.join(global, "package.json"),
+      JSON.stringify({ name: "@annouimo/c-exam-kit-preset", version: "0.1.9" }));
+    assert.deepEqual((await installedPresets()).map((entry) => entry.version), ["0.2.0", "0.1.9"]);
+    assert.equal((await presetForVersion("0.1.9")).version, "0.1.9");
+    assert.equal((await presetForVersion("0.1.0")).version, "0.1.0");
     await setCoursePresetVersion(root, "0.2.0");
     const marker=path.join(root,".accoding","initial-hashes",binding.bindingId+".json");
     await fs.mkdir(path.dirname(marker),{recursive:true});
@@ -105,6 +116,7 @@ test("installed npm C99 data and per-question update preserve original code", as
     const second = await store.import({ ...problem, target: { kind: "problemset", problemId: "321" } }, "B-Test");
     await fs.writeFile(path.join(root, second.sourceFile), updated);
     await fs.rm(global, { recursive: true });
+    await fs.rm(newGlobal, { recursive: true });
     await fs.rm(pkg, { recursive: true });
     const app = new StandaloneWorkflow();
     try {

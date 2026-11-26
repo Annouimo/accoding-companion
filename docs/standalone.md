@@ -1,5 +1,7 @@
 # Standalone Accoding TUI / CLI (development preview)
 
+> Historical development notes. For current installation, runtime requirements, workspace layout and release instructions, see the [current README](../README.md), [architecture](architecture.md) and [release checklist](release.md). Some commands and paths below describe the earlier preview, not the current supported distribution.
+
 This is a standalone TypeScript/Bun client. It reuses the original VS Code extension's Accoding adapters, local judge, and submission state machine. The VS Code extension is kept unchanged during migration. Real OJ account acceptance and packaged Windows/macOS builds remain to be verified.
 
 ## Commands
@@ -44,12 +46,12 @@ Existing numeric workspaces are never renamed. They continue to work with their 
 
 ## Importing the real exam-kit preset
 
-The preset remains owned by the [independent c-exam-kit repository](https://github.com/Annouimo/c-exam-kit/tree/feat/lightweight-io-standalone-preset). Clone it locally (or extract a ZIP), then set its directory or manifest as the CLI default:
+The preset remains owned by the [independent c-exam-kit repository](https://github.com/Routilet/c-exam-kit/tree/main/scaffold/presets/exam-io-c99). For normal use, install the versioned `@routilet/c-exam-kit` package using the Companion launcher. For local preset development, clone the repository, build its versioned manifest, and select that generated manifest:
 
 ~~~sh
-accoding config preset "/Users/you/c-exam-kit/scaffold/presets/exam-io-c99"
-# or:
-accoding config preset "/Users/you/c-exam-kit/scaffold/presets/exam-io-c99/manifest.json"
+cd /path/to/c-exam-kit
+node npm/accoding-preset/scripts/build-preset.mjs
+accoding config preset "$PWD/npm/accoding-preset/preset/manifest.json"
 ~~~
 
 Drag-and-drop also works in the TUI settings. Each new question refers to the selected version's shared immutable snapshot; updates to c-exam-kit do not change already initialized question code. The integration CI compiles the actual input/output macros including \`read_ints\` and \`print_ints\` into a standalone C99 source file.

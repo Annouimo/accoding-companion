@@ -1,10 +1,13 @@
 name: Publish npm stable release
 
 on:
+  push:
+    branches: [main]
+    paths: ['package.json', '.github/workflows/publish-npm.yml']
   workflow_dispatch:
     inputs:
       mode:
-        description: "DRY_RUN builds only; PUBLISH_LATEST publishes the CLI; PUBLISH_LAUNCHERS publishes the ZIPs"
+        description: "DRY_RUN builds only (also prepares a tarball for first manual publish); PUBLISH_LATEST publishes the CLI; PUBLISH_LAUNCHERS publishes the ZIPs"
         type: choice
         required: true
         default: DRY_RUN
@@ -54,9 +57,9 @@ jobs:
           const fs=require("node:fs");
           const file="package.json";
           const pkg=JSON.parse(fs.readFileSync(file,"utf8"));
-          if(pkg.name!=="@annouimo/accoding-companion") throw Error("Unexpected package name");
-          if(pkg.repository?.url!=="git+https://github.com/Annouimo/accoding-companion.git") throw Error("GitHub provenance repository mismatch");
-          if(pkg.version!==process.env.EXPECTED_VERSION || !/^\d+\.\d+\.\d+$/.test(pkg.version)) throw Error("Expected version mismatch or not a stable version");
+          if(pkg.name!=="@routilet/accoding-companion") throw Error("Unexpected package name");
+          if(pkg.repository?.url!=="git+https://github.com/Routilet/accoding-companion.git") throw Error("GitHub provenance repository mismatch");
+          if((process.env.GITHUB_EVENT_NAME==="workflow_dispatch" && pkg.version!==process.env.EXPECTED_VERSION) || !/^\d+\.\d+\.\d+$/.test(pkg.version)) throw Error("Expected version mismatch or not a stable version");
           delete pkg.private; // Only the runner copy becomes publishable.
           fs.writeFileSync(file,JSON.stringify(pkg,null,2)+"\n");
           NODE
@@ -104,7 +107,7 @@ jobs:
   publish:
     name: Publish Accoding Companion CLI to npm latest
     needs: [pack, launcher, launcher-bundles]
-    if: ${{ inputs.mode == 'PUBLISH_LATEST' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'PUBLISH_LATEST' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -155,7 +158,7 @@ jobs:
   launcher-release:
     name: Publish double-click launcher ZIPs
     needs: [pack, launcher, launcher-bundles]
-    if: ${{ inputs.mode == 'PUBLISH_LAUNCHERS' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'PUBLISH_LAUNCHERS' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -172,9 +175,9 @@ jobs:
           EXPECTED_PRESET: ${{ inputs.expected_preset_version }}
         run: |
           set -euo pipefail
-          test "$(npm view @annouimo/accoding-companion@latest version)" = "$EXPECTED_CLI"
+          test "$(npm view @routilet/accoding-companion@latest version)" = "$EXPECTED_CLI"
           test -n "$EXPECTED_PRESET"
-          test "$(npm view @annouimo/c-exam-kit-preset@latest version)" = "$EXPECTED_PRESET"
+          test "$(npm view @routilet/c-exam-kit@latest version)" = "$EXPECTED_PRESET"
       - uses: actions/download-artifact@v4
         with:
           name: native-launchers

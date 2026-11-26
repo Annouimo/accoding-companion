@@ -2,7 +2,11 @@
 
 独立的、**非官方** Accoding 命令行／终端编程助手。用于导入课程比赛、管理 C / C++ 源码、本地评测及提交到 OJ。此项目与 Accoding、北航没有官方隶属关系。
 
-> 正式发行包见 [GitHub Releases](https://github.com/Annouimo/accoding-companion/releases/latest)。
+所属组织：[Routilet](https://github.com/Routilet) · 原始设计者：Annouimo。
+
+相关项目：[C Exam Kit](https://github.com/Routilet/c-exam-kit) 提供版本化函数资源；[C Observer](https://github.com/Routilet/c-observer) 正在开发独立运行观察功能，尚未集成。
+
+> 正式发行包见 [GitHub Releases](https://github.com/Routilet/accoding-companion/releases/latest)。
 
 ## 产品设计
 
@@ -49,7 +53,7 @@ node dist/accoding.mjs status --watch
 
 ## 安装和启动
 
-从 [最新发布页](https://github.com/Annouimo/accoding-companion/releases/latest) 下载对应平台的启动包并完整解压。Windows 双击 `Accoding Launcher.exe`，macOS 双击 `Accoding Launcher.command`。首次先选「安装」，完成后选「启动」。使用说明 HTML 随包提供，首次启动时打开。Linux 可使用下面的 npm 命令。
+从 [最新发布页](https://github.com/Routilet/accoding-companion/releases/latest) 下载对应平台的启动包并完整解压。Windows 双击 `Accoding Launcher.exe`，macOS 双击 `Accoding Launcher.command`。首次先选「安装」，完成后选「启动」。使用说明 HTML 随包提供，首次启动时打开。Linux 可使用下面的 npm 命令。
 
 函数手册随 C Exam Kit preset 0.6.6 起提供。按 H 在 Companion 中打开对应版本的函数速查。新版速查按操作分类浏览；`/` 搜索函数名或中文用途，Tab / Shift+Tab 切换类型，C 复制当前完整示例，R 跳转相关条目，U 查看使用约定，G 返回首页，H 关闭并保留阅读位置。旧版资源仍可阅读，但不一定提供全部结构化字段。新版资源只分发程序内速查数据，旧工作区可以继续阅读已保存的 Markdown 手册。
 
@@ -58,13 +62,17 @@ node dist/accoding.mjs status --watch
 也可以直接通过 npm 安装并启动：
 
 ```sh
-npm install -g @annouimo/accoding-companion @annouimo/c-exam-kit-preset
+npm install -g @routilet/accoding-companion @routilet/c-exam-kit
 accoding
 ```
 
 启动器使用独立的安装目录。直接用 npm 安装时，Companion 仍可从全局 npm 路径读取 preset。启用某个版本时，组件会复制到课程工作区。C++ 课程可直接测试和提交。启动器不安装或检测编译器。本地评测使用系统 PATH 中的 GCC / Clang，或在「设置 → 设置 C / C++ 编译器」中指定已有编译器。找不到编译器时，交互界面会自动打开随包提供的独立《编译环境配置》指引。
 
 资源升级后使用「设置 → 更新课程资源」，或从启动器确认更新当前课程。批量更新适用于源码仍与初始模板一致的题。也可以自选题目，单题切换前会试编译，并记录可撤销的旧版本。
+
+## npm 命名空间迁移
+
+新版使用 `@routilet/accoding-companion` 和 `@routilet/c-exam-kit`。原 `@annouimo` 包保留历史版本；旧启动器不会自动发现新命名空间，请从最新 Release 重新下载启动器。新原生启动器可离线启动已有旧安装，并在两个新包均可用时提示迁移；课程目录、登录凭据、资源快照不变。直接通过全局 npm 安装的用户，请在新包可用后先运行 `npm uninstall -g @annouimo/accoding-companion`（仅移除旧 CLI，避免同名命令冲突），再执行上面的新包安装命令；旧资源包可保留。不要在新发行包可用之前移除旧程序。
 
 ## 数据迁移与安全
 

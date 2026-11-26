@@ -1,5 +1,5 @@
 {
-  "name": "@annouimo/accoding-companion",
+  "name": "@routilet/accoding-companion",
   "version": "0.2.7",
   "description": "Non-official Accoding companion for C/C++ coursework",
   "type": "module",
@@ -56,9 +56,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Annouimo/accoding-companion.git"
+    "url": "git+https://github.com/Routilet/accoding-companion.git"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "homepage": "https://github.com/Routilet/accoding-companion#readme",
+  "bugs": {
+    "url": "https://github.com/Routilet/accoding-companion/issues"
   }
 }
