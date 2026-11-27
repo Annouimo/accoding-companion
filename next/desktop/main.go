@@ -35,6 +35,7 @@ type Desktop struct{
  drop []string
  prepared *localrun.Submission
  kitPackage string
+ manual *localrun.Manual
 }
 type Navigation struct { Root string `json:"root"`; Source localrun.Source `json:"source"` }
 func(d *Desktop) nav()Navigation{return Navigation{d.root,d.selected}}
@@ -51,6 +52,28 @@ func(d *Desktop) ChooseKit()(localrun.KitStatus,error){
  k,e:=localrun.LoadKitPackage(p);if e!=nil{return localrun.KitStatus{},e}
  d.mu.Lock();d.kitPackage=p;d.mu.Unlock()
  return localrun.KitStatus{Path:p,Version:k.Version},nil
+}
+func(d *Desktop) OpenManual()(localrun.Manual,error){
+ d.mu.Lock();defer d.mu.Unlock()
+ d.manual=nil
+ m,e:=localrun.LoadManual(d.selected.Path,d.kitPackage)
+ if e==nil{d.manual=&m}
+ return m,e
+}
+func(d *Desktop) SearchManual(query string)([]localrun.ReferenceHit,error){
+ d.mu.Lock();defer d.mu.Unlock()
+ if d.manual==nil{return nil,errors.New("请先打开函数手册")}
+ return localrun.SearchReference(d.manual.Reference,query),nil
+}
+func(d *Desktop) CopyManualExample(id,key,fingerprint string)error{
+ d.mu.Lock()
+ if d.manual==nil||d.manual.Fingerprint!=fingerprint{d.mu.Unlock();return errors.New("手册已变化，请重新打开")}
+ m,e:=localrun.LoadManual(d.selected.Path,d.kitPackage)
+ if e!=nil||m.Fingerprint!=fingerprint||m.Origin!=d.manual.Origin||m.SourcePath!=d.manual.SourcePath{d.mu.Unlock();return errors.New("资源或当前文件已变化，请重新打开手册")}
+ example,e:=m.Example(id,key);d.mu.Unlock()
+ if e!=nil{return e}
+ if !d.native.Clipboard.SetText(example){return errors.New("无法写入系统剪贴板")}
+ return nil
 }
 func(d *Desktop) Config()(localrun.Settings,error){d.mu.Lock();defer d.mu.Unlock();return d.settings,nil}
 func(d *Desktop) ConfigWarning()string{d.mu.Lock();defer d.mu.Unlock();return d.settingsError}
