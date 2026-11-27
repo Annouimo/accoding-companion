@@ -57,6 +57,10 @@ func caseDirs(p string,create bool)error{
 func readCases(p string)(CaseSet,error){
  empty:=CaseSet{Cases:[]Case{},Revision:"missing"}
  if e:=caseDirs(p,false);e!=nil{if errors.Is(e,os.ErrNotExist){return empty,nil};return CaseSet{},e}
+ return readCaseDocument(p)
+}
+func readCaseDocument(p string)(CaseSet,error){
+ empty:=CaseSet{Cases:[]Case{},Revision:"missing"}
  st,e:=os.Lstat(p);if errors.Is(e,os.ErrNotExist){return empty,nil};if e!=nil{return CaseSet{},e}
  if !st.Mode().IsRegular(){return CaseSet{},errors.New("测试数据不是普通文件")}
  f,e:=os.Open(p);if e!=nil{return CaseSet{},e};defer f.Close()
