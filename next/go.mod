@@ -1,0 +1,5 @@
+module github.com/Routilet/accoding-companion/next
+
+go 1.26.0
+
+require github.com/wailsapp/wails/v3 v3.1.0
