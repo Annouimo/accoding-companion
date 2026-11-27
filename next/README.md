@@ -1,36 +1,17 @@
-# Companion Next · 03a 开发预览
+# Companion Next · 03b 开发预览
 
-旧版保持原样。本目录为独立 Go 模块，基于阶段 02 设计 PR #27。真实原生窗口 → 选择普通 C 文件 → 输入 → 编译 → 执行 → 显示 stdout/stderr、编译诊断、退出状态。无模拟编译。
+基于已通过双平台 CI 的 03a（PR #28）。本阶段真实 C99 单文件测试：每个文件一份 .companion/cases/<文件名>.json、显式保存（运行前保存草稿）、可空预期、批量一次编译、独立运行、输出差异、原始输出和结构化编译诊断。打开普通源码不写数据。缺失/损坏/外部修改不会静默覆盖；结果仅保留本次运行，源/样例/配置变化通过运行结束、编辑与窗口焦点检查提示过期。完整文件监视、跨文件会话缓存、重命名/恢复入口、文件树在 03c。仍无 Exam Kit、C++、OJ、Observer、分发。
 
-## 构建（开发环境）
+## 构建
 
-Go 1.26、Node 22、现有 GCC/Clang；Windows 11 amd64 / macOS arm64。运行生成的桌面程序不需要 Go/Node。
+Go 1.26、Node 22，已有 GCC/Clang。next/desktop/frontend 执行 npm install --ignore-scripts --no-audit --no-fund && npm run build；next/ 执行 go mod tidy、go test ./internal/localrun、go vet ./internal/localrun、go build -tags production ./desktop。CI 独立双平台产物，仅 artifact，不发布。锁文件仍由 CI 附带。
 
-```sh
-cd next/desktop/frontend
-npm install --ignore-scripts --no-audit --no-fund
-npm run build
-cd ../..
-go mod tidy
-go test ./internal/localrun
-go vet ./internal/localrun
-go build -tags production -o out/companion ./desktop
-```
+## 审核和真机
 
-CI 单独构建 Windows EXE / macOS ad-hoc .app ZIP，只生成临时 artifact，不发布。初次 CI 解析依赖并附锁文件，后续审核固化；当前未声称可复现锁定。应用读取所选磁盘文件，不写用户目录；运行用户明确选择的可信程序，非安全沙箱。运行程序本身可能写文件或联网。无需注册、账号或 .companion。编译器由用户自行准备。Go/Wails API 基于 Observer 已验证方向；当前窗口未真机验证。
+打开 C 文件，添加多组输入，分别使用预期空字符串、未勾选比较、正常预期、错误预期，运行全部并检查实际输出和差异；关闭后重新打开确认保存；外部编辑源或样例，切回窗口后观察过期提示，冲突保存应失败；运行无限循环后取消。损坏 JSON 不覆盖。Windows 检查 .companion 隐藏属性、中文路径、同卷替换；macOS 验证窗口、断网、键盘与退出。真机尚未验收。测试数据限制 32 组、每组输入及预期 1 MiB、JSON 总 8 MiB（保护 UI 与内存）。运行无样例使用临时空输入，不写盘。
 
-## 人工验收
+## 限制
 
-1. 启动 EXE/APP（或带单个 .c 路径启动），打开包含中文和空格的目录下普通 C 文件；父目录和文件名正确。
-2. 使用标准输入回显程序，输入多行文本，确认输出、EOF、空输入；外部编辑后重新运行读取最新版本。
-3. 语法错误显示编译 stderr；非零退出显示运行失败；无限循环超时；取消可恢复按钮；缺编译器报明确错误。
-4. 检查原始文件和目录不被工具写入；断网可启动并运行（已安装编译器）。
-5. Windows Dev-C++ GCC 的中文路径、macOS 系统 WebView、输入法/窗口/关闭需真实设备复验。
+Windows Job Object 尽早接管，host 不允许嵌套 job 或短进程先退出时降级 taskkill；仍有启动至接管的小窗口，不是沙箱，不能保证处理刻意脱离进程组的代码。POSIX 进程组在退出/取消清理。真实程序可能写文件或联网。窗口关闭时等待当前任务取消；真实平台行为待验收。结果比较显示首个差异及可见空白字符，不是完整逐字符 LCS 差异；诊断解析保留原始行，映射仅普通单文件。暂时同步返回整批结果，无逐组进度；单次只允许一个任务，运行中不切换文件。前端通过焦点检查外部变化，完整实时文件监听与多文件结果缓存在 03c。外部程序不遵守辅助锁时仍可能在检查与替换之间竞争；不宣称文件系统事务。资源、复制和 CLI 留后续。
 
-## 范围与已知限制
-
-- 仅普通 C99 单文件；C++、本地头文件、Exam Kit、任意预处理展开、多文件项目、样例保存/比较/批量、完整文件树、拖入、复制、手册、Observer/Routilet、OJ 均未实现。
-- 本轮使用 TypeScript + 原生 DOM，避免为首个切片引入组件框架；产品原型仍为设计参考。文件列表暂只展示已选文件。后续按原型逐步恢复完整交互。
-- 核心使用参数数组调用真实工具链，限制时长和输出、取消、临时目录清理。进程树终止为基础实现；Windows taskkill、父进程先退出的后代/管道清理、关闭窗口等待与跨卷 Unicode 路径需要 03b 加固与真机测试。非 sandbox。
-- 目前只有运行结束时源码变化检查，不提供完整会话失效/运行 ID；03b/03c 实现。编译诊断当前原始文本，不提供精确原文件映射。
-- 现有设计文档均为上游 stacked PR；不得合并/发布。真实构建及测试结果以 CI 和人工验收为准。
+本轮不改变旧版源码、正式包及发行。stacked PR 基于 03a。

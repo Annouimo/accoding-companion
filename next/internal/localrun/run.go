@@ -6,6 +6,8 @@ import (
  "bytes"
  "context"
  "crypto/sha256"
+ "crypto/rand"
+ "encoding/json"
  "encoding/hex"
  "errors"
  "fmt"
@@ -105,13 +107,26 @@ func process(parent context.Context,exe string,args []string,cwd,input string,en
  ctx,stop:=context.WithTimeout(parent,timeout);defer stop()
  start:=time.Now()
  c:=&capture{limit:maxOutput,stop:stop}
- cmd:=exec.CommandContext(ctx,exe,args...)
+ cmd:=exec.Command(exe,args...)
  cmd.Dir=cwd;cmd.Env=env;cmd.Stdin=strings.NewReader(input)
  cmd.Stdout=sink{c:c};cmd.Stderr=sink{c:c,stderr:true}
  configureProcess(cmd)
- cmd.WaitDelay=2*time.Second
+ cmd.WaitDelay=500*time.Millisecond
  if ctx.Err()!=nil{return Process{ExitCode:-1,State:"cancelled"}}
- err:=cmd.Run()
+ err:=cmd.Start()
+ if err==nil{
+  owner:=ownProcess(cmd)
+  done:=make(chan error,1)
+  go func(){done<-cmd.Wait()}()
+  select{
+  case err=<-done:
+   owner.stop()
+  case <-ctx.Done():
+   owner.stop()
+   err=<-done
+  }
+  owner.close()
+ }
  c.mu.Lock();defer c.mu.Unlock()
  r:=Process{Stdout:c.out.String(),Stderr:c.err.String(),ExitCode:-1,ElapsedMS:time.Since(start).Milliseconds(),State:"ok"}
  if cmd.ProcessState!=nil{r.ExitCode=cmd.ProcessState.ExitCode()}
@@ -138,31 +153,85 @@ func artifactArg(cwd,p string)string{
  r,e:=filepath.Rel(cwd,p);if e!=nil{return p};return "."+string(filepath.Separator)+r
 }
 
-// Run captures the source bytes once, compiles a temporary copy, then runs
-// the executable with exactly the provided stdin (no implicit newline).
-// The source directory remains cwd; this is not a security sandbox.
-func Run(ctx context.Context,path,input,compiler string)(result Result,err error){
- if len(input)>maxInput{return result,errors.New("输入超过 1 MiB")}
+type CaseResult struct {
+ Index int `json:"index"`
+ Input string `json:"input"`
+ Expected *string `json:"expected"`
+ Process Process `json:"process"`
+ State string `json:"state"`
+ Difference *Difference `json:"difference,omitempty"`
+}
+type BatchResult struct {
+ RunID string `json:"runId"`
+ Source Source `json:"source"`
+ SourceDigest string `json:"sourceDigest"`
+ ToolchainDigest string `json:"toolchainDigest"`
+ CaseRevision string `json:"caseRevision"`
+ Compiler string `json:"compiler"`
+ State string `json:"state"`
+ Compilation Process `json:"compilation"`
+ Diagnostics []Diagnostic `json:"diagnostics"`
+ Cases []CaseResult `json:"cases"`
+ Stale bool `json:"stale"`
+}
+var cflags=[]string{"-std=c99","-O2","-Wall","-Wextra"}
+func toolchainDigest(cc string)string{b,_:=json.Marshal([]any{cc,cflags,"-lm"});return digest(b)}
+func Current(r BatchResult,compiler string)bool{
+ s,e:=Open(r.Source.Path);if e!=nil{return false}
+ b,e:=readSource(s);if e!=nil||digest(b)!=r.SourceDigest{return false}
+ cc,e:=compilerPath(compiler);if e!=nil||toolchainDigest(cc)!=r.ToolchainDigest{return false}
+ cases,e:=LoadCases(s.Path);return e==nil&&cases.Revision==r.CaseRevision
+}
+func batch(ctx context.Context,path,compiler string,cs CaseSet,selection int)(result BatchResult,err error){
+ if e:=validateCases(cs.Cases);e!=nil{return result,e}
  s,e:=Open(path);if e!=nil{return result,e}
  b,e:=readSource(s);if e!=nil{return result,e}
  if e=checkSource(b);e!=nil{return result,e}
  cc,e:=compilerPath(compiler);if e!=nil{return result,e}
- result=Result{Source:s,SourceDigest:digest(b),Compiler:cc,State:"compilation_failed"}
- defer func(){current,e:=readSource(s);result.Stale=e!=nil||digest(current)!=result.SourceDigest}()
+ var id [16]byte;if _,e=rand.Read(id[:]);e!=nil{return result,e}
+ result=BatchResult{RunID:hex.EncodeToString(id[:]),Source:s,SourceDigest:digest(b),Compiler:cc,ToolchainDigest:toolchainDigest(cc),CaseRevision:cs.Revision,State:"compilation_failed",Cases:[]CaseResult{},Diagnostics:[]Diagnostic{}}
+ defer func(){result.Stale=!Current(result,compiler)}()
+ if len(cs.Cases)==0{cs.Cases=[]Case{{Input:""}};selection=0}
+ if selection< -1||selection>=len(cs.Cases){return result,errors.New("无效的测试编号")}
  dir,e:=os.MkdirTemp("","companion-run-");if e!=nil{return result,e}
  defer func(){if e:=os.RemoveAll(dir);e!=nil&&err==nil{err=fmt.Errorf("清理临时目录失败: %w",e)}}()
  snapshot:=filepath.Join(dir,"source.c");program:=filepath.Join(dir,"program")
  if runtime.GOOS=="windows"{program+=".exe"}
  if e=os.WriteFile(snapshot,b,0600);e!=nil{return result,e}
  env:=childEnv(cc)
- result.Compilation=process(ctx,cc,[]string{"-std=c99","-O2","-Wall","-Wextra",artifactArg(s.Directory,snapshot),"-o",artifactArg(s.Directory,program),"-lm"},s.Directory,"",env,30*time.Second)
+ args:=append(append([]string{},cflags...),artifactArg(s.Directory,snapshot),"-o",artifactArg(s.Directory,program),"-lm")
+ result.Compilation=process(ctx,cc,args,s.Directory,"",env,30*time.Second)
+ result.Diagnostics=diagnostics(result.Compilation.Stderr,snapshot,s.Path)
  if result.Compilation.State!="ok"{
   if result.Compilation.State!="failed"{result.State=result.Compilation.State}
   return result,nil
  }
- r:=process(ctx,program,nil,s.Directory,input,env,2*time.Second)
- result.Execution=&r
- result.State=r.State
- if r.State=="ok"{result.State="ran"}else if r.State=="failed"{result.State="runtime_failed"}
+ result.State="completed"
+ for i,c:=range cs.Cases{
+  if selection>=0&&selection!=i{continue}
+  if ctx.Err()!=nil{result.State="cancelled";break}
+  p:=process(ctx,program,nil,s.Directory,c.Input,env,2*time.Second)
+  r:=CaseResult{Index:i,Input:c.Input,Expected:c.Expected,Process:p,State:p.State}
+  if p.State=="ok"{
+   if c.Expected==nil{r.State="ran"}else if r.Difference=Compare(*c.Expected,p.Stdout);r.Difference==nil{r.State="passed"}else{r.State="mismatch"}
+  }else if p.State=="failed"{r.State="runtime_failed"}
+  result.Cases=append(result.Cases,r)
+  if p.State=="cancelled"{result.State="cancelled";break}
+ }
  return result,nil
+}
+// RunBatch uses an immutable copy of the persisted cases and rejects a stale UI revision.
+func RunBatch(ctx context.Context,path,compiler,revision string,selection int)(BatchResult,error){
+ cs,e:=LoadCases(path);if e!=nil{return BatchResult{},e}
+ if cs.Revision!=revision{return BatchResult{},errors.New("测试数据已变化，请重新读取")}
+ return batch(ctx,path,compiler,cs,selection)
+}
+// Run is retained for the first-slice regression tests and single input callers.
+func Run(ctx context.Context,path,input,compiler string)(Result,error){
+ cs,e:=LoadCases(path);if e!=nil{return Result{},e}
+ cs.Cases=[]Case{{Input:input}}
+ b,e:=batch(ctx,path,compiler,cs,0)
+ r:=Result{Source:b.Source,SourceDigest:b.SourceDigest,Compiler:b.Compiler,State:b.State,Compilation:b.Compilation,Stale:b.Stale}
+ if len(b.Cases)>0{r.Execution=&b.Cases[0].Process;r.State=b.Cases[0].State}
+ return r,e
 }
