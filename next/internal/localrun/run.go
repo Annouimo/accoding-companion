@@ -53,7 +53,7 @@ type Result struct {
 func Open(path string) (Source,error) {
  p,e:=filepath.Abs(path)
  if e!=nil{return Source{},e}
- if !strings.EqualFold(filepath.Ext(p),".c"){return Source{},errors.New("本阶段仅支持普通 .c 文件")}
+ if !sourceExtension(p){return Source{},errors.New("请选择普通 C/C++ 源文件")}
  st,e:=os.Lstat(p)
  if e!=nil{return Source{},e}
  if !st.Mode().IsRegular(){return Source{},errors.New("请选择普通 C 源文件，而不是目录或链接")}
@@ -77,19 +77,19 @@ func checkSource(b []byte) error {
  s:=strings.ReplaceAll(strings.ReplaceAll(string(b),"\\\r\n",""),"\\\n","")
  for _,m:=range include.FindAllStringSubmatch(s,-1){
   if !systemInclude.MatchString(m[1])||strings.Contains(m[1],"..")||strings.Contains(m[1],"</"){
-   return errors.New("03a 暂不支持本地、宏生成或复杂 include（Exam Kit 在阶段 04 接入）")
+   return errors.New("当前暂不支持本地、宏生成或复杂 include（Exam Kit 在阶段 04 接入）")
   }
  }
  return nil
 }
-func compilerPath(explicit string)(string,error){
+func compilerPath(explicit string)(string,error){return compilerFor(explicit,false)}
+func compilerFor(explicit string,cpp bool)(string,error){
  names:=[]string{explicit}
  if explicit==""{
-  names=[]string{os.Getenv("CC")}
-  if runtime.GOOS=="windows"{names=append(names,"gcc")}else{names=append(names,"cc")}
+  if cpp {names=[]string{os.Getenv("CXX")};if runtime.GOOS=="windows"{names=append(names,"g++")}else{names=append(names,"c++")}}else{names=[]string{os.Getenv("CC")};if runtime.GOOS=="windows"{names=append(names,"gcc")}else{names=append(names,"cc")}}
  }
  for _,n:=range names{if n==""{continue};p,e:=exec.LookPath(n);if e==nil{return filepath.Abs(p)}}
- return "",errors.New("未找到 C 编译器，请安装 GCC/Clang 或在编译器栏填写现有可执行文件路径")
+ return "",errors.New("未找到 C/C++ 编译器，请安装 GCC/Clang 或在编译器栏填写现有可执行文件路径")
 }
 func digest(b []byte)string{h:=sha256.Sum256(b);return hex.EncodeToString(h[:])}
 
@@ -175,11 +175,12 @@ type BatchResult struct {
  Stale bool `json:"stale"`
 }
 var cflags=[]string{"-std=c99","-O2","-Wall","-Wextra"}
-func toolchainDigest(cc string)string{b,_:=json.Marshal([]any{cc,cflags,"-lm"});return digest(b)}
+func flagsFor(path string)[]string{if isCPP(path){return []string{"-std=c++17","-O2","-Wall","-Wextra"}};return cflags}
+func toolchainDigest(cc,path string)string{b,_:=json.Marshal([]any{cc,flagsFor(path),"-lm"});return digest(b)}
 func Current(r BatchResult,compiler string)bool{
  s,e:=Open(r.Source.Path);if e!=nil{return false}
  b,e:=readSource(s);if e!=nil||digest(b)!=r.SourceDigest{return false}
- cc,e:=compilerPath(compiler);if e!=nil||toolchainDigest(cc)!=r.ToolchainDigest{return false}
+ cc,e:=compilerFor(compiler,isCPP(s.Path));if e!=nil||toolchainDigest(cc,s.Path)!=r.ToolchainDigest{return false}
  cases,e:=LoadCases(s.Path);return e==nil&&cases.Revision==r.CaseRevision
 }
 func batch(ctx context.Context,path,compiler string,cs CaseSet,selection int)(result BatchResult,err error){
@@ -187,19 +188,19 @@ func batch(ctx context.Context,path,compiler string,cs CaseSet,selection int)(re
  s,e:=Open(path);if e!=nil{return result,e}
  b,e:=readSource(s);if e!=nil{return result,e}
  if e=checkSource(b);e!=nil{return result,e}
- cc,e:=compilerPath(compiler);if e!=nil{return result,e}
+ cc,e:=compilerFor(compiler,isCPP(s.Path));if e!=nil{return result,e}
  var id [16]byte;if _,e=rand.Read(id[:]);e!=nil{return result,e}
- result=BatchResult{RunID:hex.EncodeToString(id[:]),Source:s,SourceDigest:digest(b),Compiler:cc,ToolchainDigest:toolchainDigest(cc),CaseRevision:cs.Revision,State:"compilation_failed",Cases:[]CaseResult{},Diagnostics:[]Diagnostic{}}
+ result=BatchResult{RunID:hex.EncodeToString(id[:]),Source:s,SourceDigest:digest(b),Compiler:cc,ToolchainDigest:toolchainDigest(cc,s.Path),CaseRevision:cs.Revision,State:"compilation_failed",Cases:[]CaseResult{},Diagnostics:[]Diagnostic{}}
  defer func(){result.Stale=!Current(result,compiler)}()
  if len(cs.Cases)==0{cs.Cases=[]Case{{Input:""}};selection=0}
  if selection< -1||selection>=len(cs.Cases){return result,errors.New("无效的测试编号")}
  dir,e:=os.MkdirTemp("","companion-run-");if e!=nil{return result,e}
  defer func(){if e:=os.RemoveAll(dir);e!=nil&&err==nil{err=fmt.Errorf("清理临时目录失败: %w",e)}}()
- snapshot:=filepath.Join(dir,"source.c");program:=filepath.Join(dir,"program")
+ snapshot:=filepath.Join(dir,"source"+strings.ToLower(filepath.Ext(s.Path)));program:=filepath.Join(dir,"program")
  if runtime.GOOS=="windows"{program+=".exe"}
  if e=os.WriteFile(snapshot,b,0600);e!=nil{return result,e}
  env:=childEnv(cc)
- args:=append(append([]string{},cflags...),artifactArg(s.Directory,snapshot),"-o",artifactArg(s.Directory,program),"-lm")
+ args:=append(append([]string{},flagsFor(s.Path)...),artifactArg(s.Directory,snapshot),"-o",artifactArg(s.Directory,program),"-lm")
  result.Compilation=process(ctx,cc,args,s.Directory,"",env,30*time.Second)
  result.Diagnostics=diagnostics(result.Compilation.Stderr,snapshot,s.Path)
  if result.Compilation.State!="ok"{
