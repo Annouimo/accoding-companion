@@ -21,7 +21,8 @@ func TestFileTreeAndCreate(t *testing.T){
 }
 func TestRenameAndRestore(t *testing.T){
  p:=source(t,"int main(void){return 0;}")
- root,_:=OpenDirectory(filepath.Dir(p))
+ root,e:=OpenDirectory(filepath.Dir(p));if e!=nil{t.Fatal(e)}
+ p=filepath.Join(root,filepath.Base(p))
  cs,e:=SaveCases(p,[]Case{{"abc",str("xyz")}},"missing");if e!=nil{t.Fatal(e)}
  s,e:=RenameSource(root,p,"B.c");if e!=nil{t.Fatal(e)}
  if _,e=os.Stat(p);!os.IsNotExist(e){t.Fatal("old source remains")}
@@ -44,7 +45,8 @@ func TestCPP(t *testing.T){
 
 func TestImportAppendAndSeparateExtensions(t *testing.T){
  p:=source(t,"int main(void){return 0;}")
- root,_:=OpenDirectory(filepath.Dir(p))
+ root,e:=OpenDirectory(filepath.Dir(p));if e!=nil{t.Fatal(e)}
+ p=filepath.Join(root,filepath.Base(p))
  q,e:=CreateSource(root,root,"A.cpp");if e!=nil{t.Fatal(e)}
  cs,e:=SaveCases(p,[]Case{{"one",nil}},"missing");if e!=nil{t.Fatal(e)}
  cp,_:=casePath(p)
