@@ -2,6 +2,9 @@ package localrun
 
 import (
  "encoding/json"
+ "context"
+ "runtime"
+ "time"
  "os"
  "path/filepath"
  "strings"
@@ -50,4 +53,19 @@ func TestReleasedObserverCapabilities(t *testing.T){
  root:=os.Getenv("COMPANION_TEST_OBSERVER_PACKAGE");if root==""{t.Skip("release package not provided")}
  info,e:=ProbeObserver(root);if e!=nil{t.Fatal(e)}
  t.Logf("Observer %s / %s capabilities verified",info.Version,info.Backend)
+}
+
+func TestObserverRealKitCompile(t *testing.T){
+ pkg:=os.Getenv("COMPANION_TEST_KIT_PACKAGE");if pkg==""{t.Skip("real package fixture not provided")}
+ requireCompiler(t)
+ s:=kitSource(t,pkg,"int main(void){\n  /* keep the exact original line */ int x=read_int();\n  printf(\"%d\\n\",x);\n  return 0;\n}\n")
+ cs,e:=SaveCases(s.Path,[]Case{{"42\n",str("42\n")}},"missing");if e!=nil{t.Fatal(e)}
+ o,e:=PrepareObservation(s.Path,"",cs.Revision,0,ObserverInfo{Backend:"lldb"});if e!=nil{t.Fatal(e)}
+ defer o.Cleanup()
+ cc,e:=compilerPath("");if e!=nil{t.Fatal(e)}
+ program:=filepath.Join(o.Directory,"program");if runtime.GOOS=="windows"{program+=".exe"}
+ r:=process(context.Background(),cc,[]string{"-std=c99","-g","-O0",artifactArg(s.Directory,filepath.Join(o.Directory,"source.c")),"-lm","-o",artifactArg(s.Directory,program)},s.Directory,"",childEnv(cc),30*time.Second)
+ if r.State!="ok"{t.Fatalf("observation source compile: %+v",r)}
+ r=process(context.Background(),program,nil,s.Directory,"42\n",childEnv(cc),2*time.Second)
+ if r.State!="ok"||normalize(r.Stdout)!="42"{t.Fatalf("observation execution: %+v",r)}
 }

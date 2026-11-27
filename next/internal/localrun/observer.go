@@ -168,25 +168,22 @@ func PrepareObservation(path,compiler,revision string,selection int,info Observe
 type ObserverProcess struct{
  cmd *exec.Cmd
  observation Observation
+ log *limitedLog
 }
 type limitedLog struct{b bytes.Buffer}
 func(l *limitedLog)Write(p []byte)(int,error){n:=len(p);left:=16384-l.b.Len();if left>0{if len(p)>left{p=p[:left]};_,_=l.b.Write(p)};return n,nil}
 func StartObserver(info ObserverInfo,o Observation)(*ObserverProcess,error){
  cmd:=exec.Command(info.Executable,"--session",o.SessionPath)
  cmd.Dir=filepath.Dir(info.Executable)
- cmd.Env=childEnvForObserver(o)
+ log:=&limitedLog{};cmd.Stderr=log
+ cmd.WaitDelay=2*time.Second
  if e:=cmd.Start();e!=nil{return nil,e}
- return &ObserverProcess{cmd:cmd,observation:o},nil
-}
-func childEnvForObserver(o Observation)[]string{
- // Observer itself resolves debugger and compiler; session specifies
- // the absolute compiler path. No extra environment or credentials.
- return nil
+ return &ObserverProcess{cmd:cmd,observation:o,log:log},nil
 }
 func(p *ObserverProcess) Wait()error{
  e:=p.cmd.Wait()
  cleanup:=p.observation.Cleanup()
- if e!=nil{return fmt.Errorf("Observer 启动或退出失败: %w",e)}
+ if e!=nil{return fmt.Errorf("Observer 启动或退出失败: %w %s",e,p.log.b.String())}
  if cleanup!=nil{return fmt.Errorf("观察会话清理失败: %w",cleanup)}
  return nil
 }
