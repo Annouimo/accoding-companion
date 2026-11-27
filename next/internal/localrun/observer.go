@@ -79,8 +79,18 @@ func ProbeObserver(root string)(ObserverInfo,error){
  if p.State!="ok"{return ObserverInfo{},fmt.Errorf("Observer 能力查询失败: %s %s",p.State,p.Stderr)}
  var c observerCapabilities
  if e=json.Unmarshal([]byte(p.Stdout),&c);e!=nil{return ObserverInfo{},fmt.Errorf("Observer 能力响应无效: %w",e)}
- if c.Version!=m.Version||c.Platform!=runtime.GOOS||c.Arch!=runtime.GOARCH||!hasV1(c.SessionSchemaVersions)||!hasString(c.Backends,backend)||!hasString(c.SessionFeatures,"backend")||!hasString(c.SessionFeatures,"comparison"){return ObserverInfo{},errors.New("Observer 能力与 manifest 或 session v1 不匹配")}
+ if e=validateObserverCapabilities(c,m.Version,runtime.GOOS,runtime.GOARCH,backend);e!=nil{return ObserverInfo{},e}
  return ObserverInfo{Version:c.Version,Executable:path,Backend:backend},nil
+}
+
+ // Observer v0.2.0 reports implementation IDs (gdb-mi/lldb-dap),
+ // whereas session.backend uses selector names (gdb/lldb).
+func validateObserverCapabilities(c observerCapabilities,version,platform,arch,backend string)error{
+ reported:=map[string]string{"gdb":"gdb-mi","lldb":"lldb-dap"}[backend]
+ if reported==""||c.Version!=version||c.Platform!=platform||c.Arch!=arch||!hasV1(c.SessionSchemaVersions)||!hasString(c.Backends,reported)||!hasString(c.SessionFeatures,"backend")||!hasString(c.SessionFeatures,"comparison"){
+  return fmt.Errorf("Observer 能力不匹配: version=%q platform=%q arch=%q backends=%v schemas=%v features=%v; 需要 %s/%s %s (%s), session v1",c.Version,c.Platform,c.Arch,c.Backends,c.SessionSchemaVersions,c.SessionFeatures,platform,arch,version,reported)
+ }
+ return nil
 }
 
 type observerSession struct{

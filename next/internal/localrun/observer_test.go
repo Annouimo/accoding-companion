@@ -69,3 +69,12 @@ func TestObserverRealKitCompile(t *testing.T){
  r=process(context.Background(),program,nil,s.Directory,"42\n",childEnv(cc),2*time.Second)
  if r.State!="ok"||normalize(r.Stdout)!="42"{t.Fatalf("observation execution: %+v",r)}
 }
+
+func TestObserverCapabilityBackendNames(t *testing.T){
+ for _,v:=range []struct{platform,arch,selector,reported string}{{"windows","amd64","gdb","gdb-mi"},{"darwin","arm64","lldb","lldb-dap"}}{
+  c:=observerCapabilities{Version:"0.2.0",Platform:v.platform,Arch:v.arch,Backends:[]string{v.reported},SessionSchemaVersions:[]int{1},SessionFeatures:[]string{"backend","comparison"}}
+  if e:=validateObserverCapabilities(c,"0.2.0",v.platform,v.arch,v.selector);e!=nil{t.Fatal(e)}
+  c.Backends=[]string{v.selector}
+  if e:=validateObserverCapabilities(c,"0.2.0",v.platform,v.arch,v.selector);e==nil{t.Fatal("session selector confused with backend capability ID")}
+ }
+}
