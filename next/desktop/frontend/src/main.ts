@@ -9,6 +9,7 @@ type CaseSet={cases:Case[];revision:string};
 type Process={stdout:string;stderr:string;exitCode:number;elapsedMs:number;state:string};
 type Part={text:string;changed:boolean};
 type Difference={line:number;column:number;expected:string;actual:string;expectedParts?:Part[];actualParts?:Part[];coarse?:boolean};
+type ObserverInfo={version:string;backend:string;executable:string;error?:string};
 type KitStatus={version:string;path:string;error?:string};
 type Settings={root:string;selected:string;c:string;cpp:string;editor:string};
 type Progress={phase:string;completed:number;total:number;runId:string};
@@ -23,6 +24,7 @@ const btn=(id:string)=>el<HTMLButtonElement>(id);
 const input=el<HTMLTextAreaElement>("input"),expected=el<HTMLTextAreaElement>("expected"),compare=el<HTMLInputElement>("compare"),compiler=el<HTMLInputElement>("compiler");
 let root="",expanded=new Set<string>(),treeEntries=new Map<string,Entry[]>(),refreshing=false,navEpoch=0,seenMissing=new Set<string>();
 const compilerByLanguage:Record<string,string>={c:"",cpp:""};
+let observing=false,observerPolling=false;
 let editorPath="",prepared:Submission|undefined,runningTest=false,dropCheck=false,progressCheck=false;
 const language=(s:Source)=>/\.c$/i.test(s.name)?"c":"cpp";
 const status=el("status"),result=el("result"),stale=el("stale");
@@ -36,7 +38,7 @@ function changes(){dirty=true;markStale();updateControls();}
 function updateControls(){
  btn("open").disabled=btn("openFolder").disabled=btn("settings").disabled=busy||!runtime;btn("manualBtn").disabled=busy||!runtime;for(const id of ["openEditor","reveal","copy"])btn(id).disabled=busy||!source;btn("new").disabled=btn("refreshTree").disabled=busy||!root;btn("rename").disabled=btn("import").disabled=busy||!source||!loaded;
  for(const id of ["add","save","reload","remove","run","all"])btn(id).disabled=busy||!source||(!loaded&&id!=="reload");
- btn("save").disabled||=!dirty;btn("remove").disabled||=!cases.length;btn("add").disabled||=cases.length>=32;
+ btn("observe").disabled=busy||!source||!loaded||!(/\.c$/i.test(source.name))||observing;btn("save").disabled||=!dirty;btn("remove").disabled||=!cases.length;btn("add").disabled||=cases.length>=32;
  btn("cancel").disabled=!runningTest;input.disabled=compare.disabled=compiler.disabled=busy||!loaded;expected.disabled=busy||!loaded||!compare.checked;
  el("saved").textContent=!loaded?"测试数据读取失败；不会覆盖原文件。":dirty?"有未保存修改；运行前将保存样例。":"样例已同步到磁盘（空列表不会自动写入）。";
 }
@@ -150,6 +152,17 @@ setInterval(async()=>{
  if(dropCheck)return;dropCheck=true;
  try{const p=await call<string[]|null>("TakeDrop");if(!p?.length)return;if(p.length!==1){status.textContent="一次仅支持拖入一个文件或文件夹";return}if(busy||el<HTMLDialogElement>("preview").open||el<HTMLDialogElement>("config").open||el<HTMLDialogElement>("manualDialog").open){status.textContent="请结束当前操作后重新拖入";return}await navigate(async()=>select(await call<Nav>("OpenDropped",p[0])))}catch(e){status.textContent=String(e)}finally{dropCheck=false}
 },300);
+btn("observe").onclick=async()=>{
+ if(busy||observing||!source||!loaded)return;
+ if(!confirm("使用当前磁盘源码和选中样例进行独立观察？观察构建使用 -g -O0，不代表之前测试的结果。"))return;
+ busy=true;updateControls();try{await save();await call("Observe",compiler.value.trim(),revision,selected);observing=true;el("observerState").textContent="Observer 正在运行；关闭观察窗口后清理会话。"}catch(e){el("observerState").textContent=String(e)}finally{busy=false;updateControls()}
+};
+setInterval(async()=>{
+ if(!observing||observerPolling)return;observerPolling=true;
+ try{const s=await call<string>("ObservationState");if(s!=="running"){observing=false;el("observerState").textContent=s==="closed"?"观察窗口已关闭，会话已清理。":s;updateControls()}}catch(e){el("observerState").textContent=String(e)}finally{observerPolling=false}
+},1000);
+function showObserver(o:ObserverInfo){el("observerConfigStatus").textContent=o.error?"Observer 不可用："+o.error:"Observer "+o.version+" · "+o.backend}
+btn("chooseObserver").onclick=async()=>{try{showObserver(await call<ObserverInfo>("ChooseObserver"))}catch(e){el("observerConfigStatus").textContent=String(e)}};
 const preview=el<HTMLDialogElement>("preview"),config=el<HTMLDialogElement>("config");
 const manual=installManual(call,()=>!!runtime&&!busy&&!preview.open&&!config.open);
 btn("openEditor").onclick=async()=>{try{await call("OpenEditor",editorPath.trim());status.textContent="已请求打开编辑器"}catch(e){status.textContent=String(e)}};
@@ -160,7 +173,7 @@ preview.onclose=()=>{prepared=undefined};
 btn("copyConfirm").onclick=async()=>{if(!prepared)return;btn("copyConfirm").disabled=true;try{await call("CopyPrepared",compiler.value.trim(),prepared.digest);preview.close();status.textContent="已复制当前提交源码"}catch(e){preview.close();status.textContent=String(e)}finally{btn("copyConfirm").disabled=false}};
 function showKit(k:KitStatus){el("kitStatus").textContent=k.error?"资源不可用："+k.error:"Exam Kit "+k.version+" · "+k.path}
 btn("chooseKit").onclick=async()=>{try{showKit(await call<KitStatus>("ChooseKit"))}catch(e){el("kitStatus").textContent=String(e)}};
-btn("settings").onclick=()=>{el<HTMLInputElement>("cc").value=compilerByLanguage.c;el<HTMLInputElement>("cxx").value=compilerByLanguage.cpp;el<HTMLInputElement>("editorPath").value=editorPath;config.showModal();void call<KitStatus>("KitStatus").then(showKit).catch(e=>{el("kitStatus").textContent=String(e)})};
+btn("settings").onclick=()=>{el<HTMLInputElement>("cc").value=compilerByLanguage.c;el<HTMLInputElement>("cxx").value=compilerByLanguage.cpp;el<HTMLInputElement>("editorPath").value=editorPath;config.showModal();void call<ObserverInfo>("ObserverStatus").then(showObserver).catch(e=>{el("observerConfigStatus").textContent=String(e)});void call<KitStatus>("KitStatus").then(showKit).catch(e=>{el("kitStatus").textContent=String(e)})};
 btn("closeConfig").onclick=()=>config.close();
 btn("saveConfig").onclick=async()=>{compilerByLanguage.c=el<HTMLInputElement>("cc").value.trim();compilerByLanguage.cpp=el<HTMLInputElement>("cxx").value.trim();editorPath=el<HTMLInputElement>("editorPath").value.trim();if(source)compiler.value=compilerByLanguage[language(source)];markStale();await storeConfig();config.close()};
 compiler.onchange=()=>void storeConfig();
