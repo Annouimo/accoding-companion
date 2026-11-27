@@ -14,7 +14,7 @@ import (
 func kitFixture(t *testing.T,version string)string{
  t.Helper();root:=t.TempDir();dir:=filepath.Join(root,"preset")
  if e:=os.Mkdir(dir,0700);e!=nil{t.Fatal(e)}
- manifest:=KitManifest{2,"exam-io-c99","c","c99","exam.h",[]string{"stdio.h"},[]KitComponent{
+ manifest:=KitManifest{SchemaVersion:2,ID:"exam-io-c99",Language:"c",LanguageID:"c99",Standard:"c99",HeaderFile:"exam.h",SystemHeaders:[]string{"stdio.h"},Components:[]KitComponent{
   {"read_int",[]string{"read_int"},[]string{"helper"},"static inline int read_int(void){return helper();}\n"},
   {"helper",[]string{},[]string{},"static inline int helper(void){int x; scanf(\"%d\",&x);return x;}\n"},
  }}
