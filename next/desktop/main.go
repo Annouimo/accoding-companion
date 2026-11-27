@@ -36,6 +36,9 @@ type Desktop struct{
  prepared *localrun.Submission
  kitPackage string
  manual *localrun.Manual
+ observerPackage string
+ observerDone chan struct{}
+ observerState string
 }
 type Navigation struct { Root string `json:"root"`; Source localrun.Source `json:"source"` }
 func(d *Desktop) nav()Navigation{return Navigation{d.root,d.selected}}
@@ -75,6 +78,31 @@ func(d *Desktop) CopyManualExample(id,key,fingerprint string)error{
  if !d.native.Clipboard.SetText(example){return errors.New("无法写入系统剪贴板")}
  return nil
 }
+func(d *Desktop) ObserverStatus()localrun.ObserverInfo{
+ d.mu.Lock();p:=d.observerPackage;d.mu.Unlock()
+ info,e:=localrun.ProbeObserver(p);if e!=nil{return localrun.ObserverInfo{Error:e.Error()}}
+ return info
+}
+func(d *Desktop) ChooseObserver()(localrun.ObserverInfo,error){
+ p,e:=d.native.Dialog.OpenFile().SetTitle("选择 Observer 0.2.0 npm 包目录").CanChooseFiles(false).CanChooseDirectories(true).PromptForSingleSelection()
+ if e!=nil||p==""{return d.ObserverStatus(),e}
+ info,e:=localrun.ProbeObserver(p);if e!=nil{return info,e}
+ d.mu.Lock();d.observerPackage=p;d.mu.Unlock();return info,nil
+}
+func(d *Desktop) Observe(compiler,revision string,selection int)error{
+ d.mu.Lock();defer d.mu.Unlock()
+ if d.running||d.observerDone!=nil||d.selected.Path==""{return errors.New("请先结束当前运行或观察")}
+ info,e:=localrun.ProbeObserver(d.observerPackage);if e!=nil{return e}
+ session,e:=localrun.PrepareObservation(d.selected.Path,compiler,revision,selection,info);if e!=nil{return e}
+ p,e:=localrun.StartObserver(info,session);if e!=nil{_ = session.Cleanup();return e}
+ done:=make(chan struct{});d.observerDone=done;d.observerState="running"
+ go func(){e:=p.Wait();d.mu.Lock();defer d.mu.Unlock()
+  if e!=nil{d.observerState=e.Error()}else{d.observerState="closed"}
+  d.observerDone=nil;close(done)
+ }()
+ return nil
+}
+func(d *Desktop) ObservationState()string{d.mu.Lock();defer d.mu.Unlock();return d.observerState}
 func(d *Desktop) Config()(localrun.Settings,error){d.mu.Lock();defer d.mu.Unlock();return d.settings,nil}
 func(d *Desktop) ConfigWarning()string{d.mu.Lock();defer d.mu.Unlock();return d.settingsError}
 func(d *Desktop) StoreConfig(c,cpp,editor string)error{
@@ -235,11 +263,14 @@ func(d *Desktop) IsCurrent(compiler string)(bool,error){
 }
 func(d *Desktop) Cancel(){d.mu.Lock();defer d.mu.Unlock();if d.cancel!=nil{d.cancel()}}
 func(d *Desktop) shutdown(){
- d.mu.Lock();if d.cancel!=nil{d.cancel()};done:=d.done;d.mu.Unlock()
+ d.mu.Lock();if d.cancel!=nil{d.cancel()};done:=d.done;observerDone:=d.observerDone;d.mu.Unlock()
  if done!=nil{<-done}
+ // Keep session files alive until Observer exits normally. Never kill its GUI
+ // while a debugger may need to clean up the inferior.
+ if observerDone!=nil{<-observerDone}
 }
 func main(){
- d:=&Desktop{kitPackage:os.Getenv(localrun.KitPreviewEnv)}
+ d:=&Desktop{kitPackage:os.Getenv(localrun.KitPreviewEnv),observerPackage:os.Getenv(localrun.ObserverPreviewEnv)}
  if path,e:=localrun.SettingsPath();e==nil{d.settingsPath=path;if s,e:=localrun.LoadSettings(path);e==nil{d.settings=s}else{d.settingsError=e.Error()}}else{d.settingsError=e.Error()}
  if len(os.Args)==1&&d.settings.Root!=""{
   if root,e:=localrun.OpenDirectory(d.settings.Root);e==nil{d.root=root;if d.settings.Selected!=""&&!filepath.IsAbs(d.settings.Selected){if p,e:=localrun.Within(root,filepath.Join(root,d.settings.Selected));e==nil{d.selected,_=localrun.Open(p)}}}
