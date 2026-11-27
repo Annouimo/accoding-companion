@@ -1,3 +1,4 @@
+export {};
 type Source={path:string;directory:string;name:string};
 type Process={stdout:string;stderr:string;exitCode:number;elapsedMs:number;state:string};
 type Result={source:Source;sourceDigest:string;compiler:string;state:string;compilation:Process;execution?:Process;stale:boolean};
