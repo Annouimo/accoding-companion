@@ -8,6 +8,7 @@ type CaseSet={cases:Case[];revision:string};
 type Process={stdout:string;stderr:string;exitCode:number;elapsedMs:number;state:string};
 type Part={text:string;changed:boolean};
 type Difference={line:number;column:number;expected:string;actual:string;expectedParts?:Part[];actualParts?:Part[];coarse?:boolean};
+type KitStatus={version:string;path:string;error?:string};
 type Settings={root:string;selected:string;c:string;cpp:string;editor:string};
 type Progress={phase:string;completed:number;total:number;runId:string};
 type Submission={source:Source;text:string;digest:string;verified:boolean};
@@ -136,7 +137,7 @@ btn("open").onclick=()=>void navigate(async()=>select(await call<Nav>("ChooseSou
 btn("openFolder").onclick=()=>void navigate(async()=>select(await call<Nav>("ChooseFolder")));
 btn("refreshTree").onclick=()=>void refreshTree(true);
 btn("new").onclick=()=>void navigate(async()=>{
- if(!root)return;const name=prompt("文件名（03c 仅创建普通模板，默认 Exam Kit 在 04 接入）","A.c");if(!name)return;
+ if(!root)return;const name=prompt("文件名（C 默认引入 Exam Kit，C++ 为普通模板）","A.c");if(!name)return;
  const dir=source?.directory??root;await select(await call<Nav>("Create",dir,name))
 });
 btn("rename").onclick=()=>void navigate(async()=>{if(!source)return;const name=prompt("新文件名",source.name);if(name&&name!==source.name)await select(await call<Nav>("Rename",name))});
@@ -155,7 +156,9 @@ btn("copy").onclick=async()=>{if(busy)return;busy=true;updateControls();try{prep
 btn("closePreview").onclick=()=>{prepared=undefined;preview.close()};
 preview.onclose=()=>{prepared=undefined};
 btn("copyConfirm").onclick=async()=>{if(!prepared)return;btn("copyConfirm").disabled=true;try{await call("CopyPrepared",compiler.value.trim(),prepared.digest);preview.close();status.textContent="已复制当前提交源码"}catch(e){preview.close();status.textContent=String(e)}finally{btn("copyConfirm").disabled=false}};
-btn("settings").onclick=()=>{el<HTMLInputElement>("cc").value=compilerByLanguage.c;el<HTMLInputElement>("cxx").value=compilerByLanguage.cpp;el<HTMLInputElement>("editorPath").value=editorPath;config.showModal()};
+function showKit(k:KitStatus){el("kitStatus").textContent=k.error?"资源不可用："+k.error:"Exam Kit "+k.version+" · "+k.path}
+btn("chooseKit").onclick=async()=>{try{showKit(await call<KitStatus>("ChooseKit"))}catch(e){el("kitStatus").textContent=String(e)}};
+btn("settings").onclick=()=>{el<HTMLInputElement>("cc").value=compilerByLanguage.c;el<HTMLInputElement>("cxx").value=compilerByLanguage.cpp;el<HTMLInputElement>("editorPath").value=editorPath;config.showModal();void call<KitStatus>("KitStatus").then(showKit).catch(e=>{el("kitStatus").textContent=String(e)})};
 btn("closeConfig").onclick=()=>config.close();
 btn("saveConfig").onclick=async()=>{compilerByLanguage.c=el<HTMLInputElement>("cc").value.trim();compilerByLanguage.cpp=el<HTMLInputElement>("cxx").value.trim();editorPath=el<HTMLInputElement>("editorPath").value.trim();if(source)compiler.value=compilerByLanguage[language(source)];markStale();await storeConfig();config.close()};
 compiler.onchange=()=>void storeConfig();

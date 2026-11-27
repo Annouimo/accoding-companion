@@ -34,9 +34,24 @@ type Desktop struct{
  progress localrun.Progress
  drop []string
  prepared *localrun.Submission
+ kitPackage string
 }
 type Navigation struct { Root string `json:"root"`; Source localrun.Source `json:"source"` }
 func(d *Desktop) nav()Navigation{return Navigation{d.root,d.selected}}
+func(d *Desktop) KitStatus()localrun.KitStatus{
+ d.mu.Lock();p:=d.kitPackage;d.mu.Unlock()
+ k,e:=localrun.LoadKitPackage(p);if e!=nil{return localrun.KitStatus{Path:p,Error:e.Error()}}
+ return localrun.KitStatus{Path:p,Version:k.Version}
+}
+// Temporary developer-preview selector. Routilet resolves the active
+// installation in phase 06; no package discovery/download is implemented here.
+func(d *Desktop) ChooseKit()(localrun.KitStatus,error){
+ p,e:=d.native.Dialog.OpenFile().SetTitle("选择已准备的 Exam Kit npm 包目录").CanChooseFiles(false).CanChooseDirectories(true).PromptForSingleSelection()
+ if e!=nil||p==""{return d.KitStatus(),e}
+ k,e:=localrun.LoadKitPackage(p);if e!=nil{return localrun.KitStatus{},e}
+ d.mu.Lock();d.kitPackage=p;d.mu.Unlock()
+ return localrun.KitStatus{Path:p,Version:k.Version},nil
+}
 func(d *Desktop) Config()(localrun.Settings,error){d.mu.Lock();defer d.mu.Unlock();return d.settings,nil}
 func(d *Desktop) ConfigWarning()string{d.mu.Lock();defer d.mu.Unlock();return d.settingsError}
 func(d *Desktop) StoreConfig(c,cpp,editor string)error{
@@ -117,7 +132,7 @@ func(d *Desktop) Select(path string)(Navigation,error){
 func(d *Desktop) Create(dir,name string)(Navigation,error){
  d.mu.Lock();defer d.mu.Unlock()
  if d.running{return Navigation{},errors.New("正在运行")}
- s,e:=localrun.CreateSource(d.root,dir,name);if e!=nil{return Navigation{},e}
+ s,e:=localrun.CreateSourceWithKit(d.root,dir,name,d.kitPackage);if e!=nil{return Navigation{},e}
  d.selected=s;return d.nav(),nil
 }
 func(d *Desktop) Rename(name string)(Navigation,error){
@@ -201,7 +216,7 @@ func(d *Desktop) shutdown(){
  if done!=nil{<-done}
 }
 func main(){
- d:=&Desktop{}
+ d:=&Desktop{kitPackage:os.Getenv(localrun.KitPreviewEnv)}
  if path,e:=localrun.SettingsPath();e==nil{d.settingsPath=path;if s,e:=localrun.LoadSettings(path);e==nil{d.settings=s}else{d.settingsError=e.Error()}}else{d.settingsError=e.Error()}
  if len(os.Args)==1&&d.settings.Root!=""{
   if root,e:=localrun.OpenDirectory(d.settings.Root);e==nil{d.root=root;if d.settings.Selected!=""&&!filepath.IsAbs(d.settings.Selected){if p,e:=localrun.Within(root,filepath.Join(root,d.settings.Selected));e==nil{d.selected,_=localrun.Open(p)}}}

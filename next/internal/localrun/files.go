@@ -68,16 +68,24 @@ func absent(p string)error{
  _,e:=os.Lstat(p);if e==nil{return fmt.Errorf("目标已存在：%s",p)}
  if !errors.Is(e,os.ErrNotExist){return e};return nil
 }
-func CreateSource(root,dir,name string)(Source,error){
+func CreateSource(root,dir,name string)(Source,error){return CreateSourceWithKit(root,dir,name,os.Getenv(KitPreviewEnv))}
+func CreateSourceWithKit(root,dir,name,packageRoot string)(Source,error){
  if !validName(name){return Source{},errors.New("请输入有效的 C/C++ 文件名")}
  p,e:=Within(root,dir);if e!=nil{return Source{},e}
  if e=safeDir(p,false);e!=nil{return Source{},e}
  target:=filepath.Join(p,name)
+ if e=absent(target);e!=nil{return Source{},e}
  // Never attach abandoned test data to a newly created program.
  cp:=filepath.Join(p,".companion","cases",name+".json")
  if e=caseDirs(cp,false);e==nil{if e=absent(cp);e!=nil{return Source{},e}}else if !errors.Is(e,os.ErrNotExist){return Source{},e}
  code:="#include <stdio.h>\n\nint main(void) {\n    return 0;\n}\n"
- if isCPP(name){code="#include <iostream>\n\nint main() {\n    return 0;\n}\n"}
+ if isCPP(name){code="#include <iostream>\n\nint main() {\n    return 0;\n}\n"}else{
+  k,e:=LoadKitPackage(packageRoot);if e!=nil{return Source{},e}
+  snapshot,e:=SaveKitSnapshot(root,k);if e!=nil{return Source{},e}
+  include,e:=filepath.Rel(p,filepath.Join(snapshot,"expanded.h"));if e!=nil{return Source{},e}
+  include=filepath.ToSlash(include);if strings.ContainsAny(include,"\"\r\n"){return Source{},errors.New("资源相对路径不能表示为 C include")}
+  code="#include \""+include+"\"\n"+code
+ }
  f,e:=os.OpenFile(target,os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600);if e!=nil{return Source{},e}
  _,e=f.WriteString(code);closeErr:=f.Close()
  if e==nil{e=closeErr};if e!=nil{return Source{},fmt.Errorf("新建未完整写入，请检查 %s: %w",target,e)}
