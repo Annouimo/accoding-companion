@@ -183,7 +183,16 @@ func Current(r BatchResult,compiler string)bool{
  cc,e:=compilerFor(compiler,isCPP(s.Path));if e!=nil||toolchainDigest(cc,s.Path)!=r.ToolchainDigest{return false}
  cases,e:=LoadCases(s.Path);return e==nil&&cases.Revision==r.CaseRevision
 }
-func batch(ctx context.Context,path,compiler string,cs CaseSet,selection int)(result BatchResult,err error){
+type Progress struct {
+ Phase string `json:"phase"`
+ Completed int `json:"completed"`
+ Total int `json:"total"`
+ RunID string `json:"runId"`
+}
+func batch(ctx context.Context,path,compiler string,cs CaseSet,selection int)(BatchResult,error){
+ return batchProgress(ctx,path,compiler,cs,selection,nil)
+}
+func batchProgress(ctx context.Context,path,compiler string,cs CaseSet,selection int,progress func(Progress))(result BatchResult,err error){
  if e:=validateCases(cs.Cases);e!=nil{return result,e}
  s,e:=Open(path);if e!=nil{return result,e}
  b,e:=readSource(s);if e!=nil{return result,e}
@@ -194,6 +203,9 @@ func batch(ctx context.Context,path,compiler string,cs CaseSet,selection int)(re
  defer func(){result.Stale=!Current(result,compiler)}()
  if len(cs.Cases)==0{cs.Cases=[]Case{{Input:""}};selection=0}
  if selection< -1||selection>=len(cs.Cases){return result,errors.New("无效的测试编号")}
+ total:=len(cs.Cases);if selection>=0{total=1}
+ report:=func(phase string,completed int){if progress!=nil{progress(Progress{phase,completed,total,result.RunID})}}
+ report("compiling",0)
  dir,e:=os.MkdirTemp("","companion-run-");if e!=nil{return result,e}
  defer func(){if e:=os.RemoveAll(dir);e!=nil&&err==nil{err=fmt.Errorf("清理临时目录失败: %w",e)}}()
  snapshot:=filepath.Join(dir,"source"+strings.ToLower(filepath.Ext(s.Path)));program:=filepath.Join(dir,"program")
@@ -208,6 +220,7 @@ func batch(ctx context.Context,path,compiler string,cs CaseSet,selection int)(re
   return result,nil
  }
  result.State="completed"
+ report("running",0)
  for i,c:=range cs.Cases{
   if selection>=0&&selection!=i{continue}
   if ctx.Err()!=nil{result.State="cancelled";break}
@@ -217,15 +230,19 @@ func batch(ctx context.Context,path,compiler string,cs CaseSet,selection int)(re
    if c.Expected==nil{r.State="ran"}else if r.Difference=Compare(*c.Expected,p.Stdout);r.Difference==nil{r.State="passed"}else{r.State="mismatch"}
   }else if p.State=="failed"{r.State="runtime_failed"}
   result.Cases=append(result.Cases,r)
+  report("running",len(result.Cases))
   if p.State=="cancelled"{result.State="cancelled";break}
  }
  return result,nil
 }
 // RunBatch uses an immutable copy of the persisted cases and rejects a stale UI revision.
 func RunBatch(ctx context.Context,path,compiler,revision string,selection int)(BatchResult,error){
+ return RunBatchProgress(ctx,path,compiler,revision,selection,nil)
+}
+func RunBatchProgress(ctx context.Context,path,compiler,revision string,selection int,progress func(Progress))(BatchResult,error){
  cs,e:=LoadCases(path);if e!=nil{return BatchResult{},e}
  if cs.Revision!=revision{return BatchResult{},errors.New("测试数据已变化，请重新读取")}
- return batch(ctx,path,compiler,cs,selection)
+ return batchProgress(ctx,path,compiler,cs,selection,progress)
 }
 // Run is retained for the first-slice regression tests and single input callers.
 func Run(ctx context.Context,path,input,compiler string)(Result,error){

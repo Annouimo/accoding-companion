@@ -12,6 +12,7 @@ import (
 
  "github.com/Routilet/accoding-companion/next/internal/localrun"
  "github.com/wailsapp/wails/v3/pkg/application"
+ "github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
@@ -27,9 +28,62 @@ type Desktop struct{
  root string
  last map[string]localrun.BatchResult
  order []string
+ settings localrun.Settings
+ settingsPath string
+ settingsError string
+ progress localrun.Progress
+ drop []string
+ prepared *localrun.Submission
 }
 type Navigation struct { Root string `json:"root"`; Source localrun.Source `json:"source"` }
 func(d *Desktop) nav()Navigation{return Navigation{d.root,d.selected}}
+func(d *Desktop) Config()(localrun.Settings,error){d.mu.Lock();defer d.mu.Unlock();return d.settings,nil}
+func(d *Desktop) ConfigWarning()string{d.mu.Lock();defer d.mu.Unlock();return d.settingsError}
+func(d *Desktop) StoreConfig(c,cpp,editor string)error{
+ d.mu.Lock();defer d.mu.Unlock()
+ if d.settingsPath==""{return errors.New("无法定位应用配置目录")}
+ s:=localrun.Settings{Root:d.root,C:c,CPP:cpp,Editor:editor}
+ if d.selected.Path!=""{if r,e:=filepath.Rel(d.root,d.selected.Path);e==nil{s.Selected=r}}
+ if e:=localrun.SaveSettings(d.settingsPath,s);e!=nil{return e}
+ d.settings=s;d.settingsError="";return nil
+}
+func(d *Desktop) TakeDrop()[]string{d.mu.Lock();defer d.mu.Unlock();p:=d.drop;d.drop=nil;return p}
+func(d *Desktop) OpenDropped(path string)(Navigation,error){
+ d.mu.Lock();defer d.mu.Unlock()
+ if d.running{return Navigation{},errors.New("正在运行")}
+ if s,e:=localrun.Open(path);e==nil{
+  root,e:=localrun.OpenDirectory(s.Directory);if e!=nil{return Navigation{},e}
+  s,e=localrun.Open(filepath.Join(root,s.Name));if e!=nil{return Navigation{},e}
+  d.root=root;d.selected=s;d.prepared=nil;return d.nav(),nil
+ }
+ root,e:=localrun.OpenDirectory(path);if e!=nil{return Navigation{},errors.New("请拖入一个 C/C++ 文件或普通文件夹")}
+ d.root=root;d.selected=localrun.Source{};d.prepared=nil;return d.nav(),nil
+}
+func(d *Desktop) OpenEditor(editor string)error{
+ d.mu.Lock();p:=d.selected.Path;d.mu.Unlock()
+ return localrun.OpenEditor(p,editor)
+}
+func(d *Desktop) Reveal()error{
+ d.mu.Lock();p:=d.root;if d.selected.Path!=""{p=d.selected.Directory};d.mu.Unlock()
+ if p==""{return errors.New("未选择目录")};return localrun.RevealDirectory(p)
+}
+func(d *Desktop) Prepare(compiler string)(localrun.Submission,error){
+ d.mu.Lock();defer d.mu.Unlock()
+ if d.running||d.selected.Path==""{return localrun.Submission{},errors.New("当前不能复制")}
+ var last *localrun.BatchResult
+ if r,ok:=d.last[d.selected.Path];ok{last=&r}
+ s,e:=localrun.PrepareSubmission(d.selected.Path,compiler,last);if e==nil{d.prepared=&s};return s,e
+}
+func(d *Desktop) CopyPrepared(compiler,digest string)error{
+ d.mu.Lock()
+ if d.running||d.prepared==nil||d.prepared.Source.Path!=d.selected.Path||d.prepared.Digest!=digest{d.mu.Unlock();return errors.New("预览已失效，请重新预览")}
+ s,e:=localrun.CheckSubmission(*d.prepared,compiler);d.prepared=nil;d.mu.Unlock()
+ if e!=nil{return e}
+ if !d.native.Clipboard.SetText(s.Text){return errors.New("无法写入系统剪贴板")}
+ return nil
+}
+func(d *Desktop) Progress()localrun.Progress{d.mu.Lock();defer d.mu.Unlock();return d.progress}
+
 func(d *Desktop) Initial()(Navigation,error){d.mu.Lock();defer d.mu.Unlock();return d.nav(),nil}
 func(d *Desktop) ChooseSource()(Navigation,error){
  d.mu.Lock();if d.running{d.mu.Unlock();return Navigation{},errors.New("请先结束当前运行")};d.mu.Unlock()
@@ -130,9 +184,9 @@ func(d *Desktop) RunBatch(compiler,revision string,selection int)(localrun.Batch
  d.mu.Lock()
  if d.running||d.selected.Path==""{d.mu.Unlock();return localrun.BatchResult{},errors.New("请选择源文件并结束之前的运行")}
  ctx,cancel:=context.WithCancel(context.Background())
- path:=d.selected.Path;d.running=true;d.cancel=cancel;d.done=make(chan struct{});d.mu.Unlock()
- defer func(){cancel();d.mu.Lock();d.running=false;d.cancel=nil;close(d.done);d.done=nil;d.mu.Unlock()}()
- r,e:=localrun.RunBatch(ctx,path,compiler,revision,selection)
+ path:=d.selected.Path;d.running=true;d.cancel=cancel;d.done=make(chan struct{});d.progress=localrun.Progress{Phase:"compiling"};d.mu.Unlock()
+ defer func(){cancel();d.mu.Lock();d.running=false;d.progress=localrun.Progress{};d.cancel=nil;close(d.done);d.done=nil;d.mu.Unlock()}()
+ r,e:=localrun.RunBatchProgress(ctx,path,compiler,revision,selection,func(p localrun.Progress){d.mu.Lock();d.progress=p;d.mu.Unlock()})
  if e==nil{d.mu.Lock();d.remember(r);d.mu.Unlock()}
  return r,e
 }
@@ -148,6 +202,10 @@ func(d *Desktop) shutdown(){
 }
 func main(){
  d:=&Desktop{}
+ if path,e:=localrun.SettingsPath();e==nil{d.settingsPath=path;if s,e:=localrun.LoadSettings(path);e==nil{d.settings=s}else{d.settingsError=e.Error()}}else{d.settingsError=e.Error()}
+ if len(os.Args)==1&&d.settings.Root!=""{
+  if root,e:=localrun.OpenDirectory(d.settings.Root);e==nil{d.root=root;if d.settings.Selected!=""&&!filepath.IsAbs(d.settings.Selected){if p,e:=localrun.Within(root,filepath.Join(root,d.settings.Selected));e==nil{d.selected,_=localrun.Open(p)}}}
+ }
  if len(os.Args)==2{if s,e:=localrun.Open(os.Args[1]);e==nil{if root,e:=localrun.OpenDirectory(s.Directory);e==nil{d.root=root;d.selected,_=localrun.Open(filepath.Join(root,s.Name))}}else if root,e:=localrun.OpenDirectory(os.Args[1]);e==nil{d.root=root}else{fmt.Fprintln(os.Stderr,e)}}
  app:=application.New(application.Options{
   Name:"Companion",Description:"Local C programming companion",
@@ -157,6 +215,7 @@ func main(){
   OnShutdown:d.shutdown,
  })
  d.native=app
- app.Window.NewWithOptions(application.WebviewWindowOptions{Title:"Companion",Width:1000,Height:700,URL:"/"})
+ win:=app.Window.NewWithOptions(application.WebviewWindowOptions{Title:"Companion",Width:1000,Height:700,URL:"/",EnableFileDrop:true})
+ win.OnWindowEvent(events.Common.WindowFilesDropped,func(e *application.WindowEvent){if ctx:=e.Context();ctx!=nil{d.mu.Lock();d.drop=append([]string(nil),ctx.DroppedFiles()...);d.mu.Unlock()}})
  if e:=app.Run();e!=nil{log.Fatal(e)}
 }
