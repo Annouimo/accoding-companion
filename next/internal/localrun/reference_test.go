@@ -48,7 +48,7 @@ func TestMalformedReference(t *testing.T){
  m,e:=LoadManual("",referenceFixture(t,"0.6.10"));if e!=nil{t.Fatal(e)}
  r:=m.Reference;r.Categories[0].Entries[0].Related=[]string{"unknown"}
  raw,_:=json.Marshal(r);if _,e=ParseReference(raw,r.Version);e==nil{t.Fatal("bad related reference accepted")}
- r=m.Reference;r.Sections=[]ReferenceSection{{Title:"bad",Entries:[]string{"missing"}}}
+ r=m.Reference;r.Categories[0].Entries[0].Related=[]string{"other"};r.Sections=[]ReferenceSection{{Title:"bad",Entries:[]string{"missing"}}}
  raw,_=json.Marshal(r);if _,e=ParseReference(raw,r.Version);e==nil{t.Fatal("bad navigation accepted")}
 }
 func TestActualKitReference(t *testing.T){

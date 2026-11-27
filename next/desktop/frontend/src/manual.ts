@@ -39,7 +39,7 @@ export function installManual(call:Call,canOpen:()=>boolean){
  let model:Manual|undefined,entries=new Map<string,Entry>(),generation=0,queryEpoch=0,current="",currentKey="",trail:{id:string;key:string}[]=[];
  function setStatus(s:string){status.textContent=s}
  function clear(){nav.replaceChildren();detail.replaceChildren();current="";currentKey="";trail=[]}
- function highlight(){for(const b of nav.querySelectorAll<HTMLButtonElement>("[data-entry]"))b.setAttribute("aria-current",String(b.dataset.entry===current))}
+ function highlight(){for(const b of Array.from(nav.querySelectorAll<HTMLButtonElement>("[data-entry]")))b.setAttribute("aria-current",String(b.dataset.entry===current))}
  function notes(){
   current="";currentKey="";highlight();detail.replaceChildren(node("h2","使用约定"));
   if(model)prose(detail,model.reference.notes||"此版本没有独立使用约定。");detail.scrollTop=0
