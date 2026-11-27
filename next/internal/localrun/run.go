@@ -77,7 +77,7 @@ func checkSource(b []byte) error {
  s:=strings.ReplaceAll(strings.ReplaceAll(string(b),"\\\r\n",""),"\\\n","")
  for _,m:=range include.FindAllStringSubmatch(s,-1){
   if !systemInclude.MatchString(m[1])||strings.Contains(m[1],"..")||strings.Contains(m[1],"</"){
-   return errors.New("当前暂不支持本地、宏生成或复杂 include（Exam Kit 在阶段 04 接入）")
+   return errors.New("当前暂不支持本地、宏生成或复杂 include（C++ 不支持 Exam Kit）")
   }
  }
  return nil
@@ -165,6 +165,10 @@ type BatchResult struct {
  RunID string `json:"runId"`
  Source Source `json:"source"`
  SourceDigest string `json:"sourceDigest"`
+ PreparedDigest string `json:"preparedDigest"`
+ ResourceDigest string `json:"resourceDigest,omitempty"`
+ KitVersion string `json:"kitVersion,omitempty"`
+ Components []string `json:"components,omitempty"`
  ToolchainDigest string `json:"toolchainDigest"`
  CaseRevision string `json:"caseRevision"`
  Compiler string `json:"compiler"`
@@ -179,7 +183,8 @@ func flagsFor(path string)[]string{if isCPP(path){return []string{"-std=c++17","
 func toolchainDigest(cc,path string)string{b,_:=json.Marshal([]any{cc,flagsFor(path),"-lm"});return digest(b)}
 func Current(r BatchResult,compiler string)bool{
  s,e:=Open(r.Source.Path);if e!=nil{return false}
- b,e:=readSource(s);if e!=nil||digest(b)!=r.SourceDigest{return false}
+ b,e:=readSource(s);if e!=nil{return false}
+ p,e:=PrepareSource(s,b);if e!=nil||p.SourceDigest!=r.SourceDigest||p.PreparedDigest!=r.PreparedDigest||p.ResourceDigest!=r.ResourceDigest{return false}
  cc,e:=compilerFor(compiler,isCPP(s.Path));if e!=nil||toolchainDigest(cc,s.Path)!=r.ToolchainDigest{return false}
  cases,e:=LoadCases(s.Path);return e==nil&&cases.Revision==r.CaseRevision
 }
@@ -196,10 +201,10 @@ func batchProgress(ctx context.Context,path,compiler string,cs CaseSet,selection
  if e:=validateCases(cs.Cases);e!=nil{return result,e}
  s,e:=Open(path);if e!=nil{return result,e}
  b,e:=readSource(s);if e!=nil{return result,e}
- if e=checkSource(b);e!=nil{return result,e}
+ prepared,e:=PrepareSource(s,b);if e!=nil{return result,e}
  cc,e:=compilerFor(compiler,isCPP(s.Path));if e!=nil{return result,e}
  var id [16]byte;if _,e=rand.Read(id[:]);e!=nil{return result,e}
- result=BatchResult{RunID:hex.EncodeToString(id[:]),Source:s,SourceDigest:digest(b),Compiler:cc,ToolchainDigest:toolchainDigest(cc,s.Path),CaseRevision:cs.Revision,State:"compilation_failed",Cases:[]CaseResult{},Diagnostics:[]Diagnostic{}}
+ result=BatchResult{RunID:hex.EncodeToString(id[:]),Source:s,SourceDigest:prepared.SourceDigest,PreparedDigest:prepared.PreparedDigest,ResourceDigest:prepared.ResourceDigest,KitVersion:prepared.KitVersion,Components:prepared.Components,Compiler:cc,ToolchainDigest:toolchainDigest(cc,s.Path),CaseRevision:cs.Revision,State:"compilation_failed",Cases:[]CaseResult{},Diagnostics:[]Diagnostic{}}
  defer func(){result.Stale=!Current(result,compiler)}()
  if len(cs.Cases)==0{cs.Cases=[]Case{{Input:""}};selection=0}
  if selection< -1||selection>=len(cs.Cases){return result,errors.New("无效的测试编号")}
@@ -210,11 +215,12 @@ func batchProgress(ctx context.Context,path,compiler string,cs CaseSet,selection
  defer func(){if e:=os.RemoveAll(dir);e!=nil&&err==nil{err=fmt.Errorf("清理临时目录失败: %w",e)}}()
  snapshot:=filepath.Join(dir,"source"+strings.ToLower(filepath.Ext(s.Path)));program:=filepath.Join(dir,"program")
  if runtime.GOOS=="windows"{program+=".exe"}
- if e=os.WriteFile(snapshot,b,0600);e!=nil{return result,e}
+ if e=os.WriteFile(snapshot,prepared.Bytes,0600);e!=nil{return result,e}
  env:=childEnv(cc)
  args:=append(append([]string{},flagsFor(s.Path)...),artifactArg(s.Directory,snapshot),"-o",artifactArg(s.Directory,program),"-lm")
  result.Compilation=process(ctx,cc,args,s.Directory,"",env,30*time.Second)
  result.Diagnostics=diagnostics(result.Compilation.Stderr,snapshot,s.Path)
+ mapPreparedDiagnostics(result.Diagnostics,prepared,s.Path)
  if result.Compilation.State!="ok"{
   if result.Compilation.State!="failed"{result.State=result.Compilation.State}
   return result,nil

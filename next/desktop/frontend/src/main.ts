@@ -11,10 +11,10 @@ type Difference={line:number;column:number;expected:string;actual:string;expecte
 type KitStatus={version:string;path:string;error?:string};
 type Settings={root:string;selected:string;c:string;cpp:string;editor:string};
 type Progress={phase:string;completed:number;total:number;runId:string};
-type Submission={source:Source;text:string;digest:string;verified:boolean};
+type Submission={source:Source;text:string;digest:string;verified:boolean;kitVersion?:string;components?:string[]};
 type CaseResult={index:number;input:string;expected:string|null;process:Process;state:string;difference?:Difference};
 type Diagnostic={severity:string;message:string;raw:string;file?:string;line?:number;column?:number};
-type Result={runId:string;source:Source;sourceDigest:string;compiler:string;state:string;compilation:Process;cases:CaseResult[];diagnostics:Diagnostic[];stale:boolean};
+type Result={runId:string;source:Source;sourceDigest:string;kitVersion?:string;components?:string[];compiler:string;state:string;compilation:Process;cases:CaseResult[];diagnostics:Diagnostic[];stale:boolean};
 type Runtime={Call:{ByName(name:string,...args:unknown[]):Promise<unknown>}};
 let runtime:Runtime|undefined,source:Source|undefined,busy=false,dirty=false,loaded=false,selected=0,revision="missing",cases:Case[]=[],last:Result|undefined;
 const el=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;
@@ -113,7 +113,7 @@ function diffView(title:string,parts:Part[]){const d=node("div","");const pre=no
 function show(r:Result){
  last=r;result.hidden=false;stale.hidden=!r.stale;status.textContent=labels[r.state]??r.state;
  const passed=r.cases.filter(c=>c.state==="passed").length,compared=r.cases.filter(c=>c.expected!==null).length;
- el("meta").textContent=r.compiler+" · "+(compared?passed+"/"+compared+" 已运行的比较样例通过":"已运行 "+r.cases.length+" 组");
+ el("meta").textContent=r.compiler+(r.kitVersion?" · Exam Kit "+r.kitVersion+" · "+(r.components?.length??0)+" 个组件":"")+" · "+(compared?passed+"/"+compared+" 已运行的比较样例通过":"已运行 "+r.cases.length+" 组");
  const wrap=el("results");wrap.replaceChildren();
  for(const c of r.cases){
   const d=node("article","","resultcard");
@@ -152,7 +152,7 @@ setInterval(async()=>{
 const preview=el<HTMLDialogElement>("preview"),config=el<HTMLDialogElement>("config");
 btn("openEditor").onclick=async()=>{try{await call("OpenEditor",editorPath.trim());status.textContent="已请求打开编辑器"}catch(e){status.textContent=String(e)}};
 btn("reveal").onclick=async()=>{try{await call("Reveal")}catch(e){status.textContent=String(e)}};
-btn("copy").onclick=async()=>{if(busy)return;busy=true;updateControls();try{prepared=await call<Submission>("Prepare",compiler.value.trim());el<HTMLTextAreaElement>("sourcePreview").value=prepared.text;el("verify").textContent=prepared.verified&&!dirty?"当前源码与全部已通过比较的样例一致。":"当前源码未完整验证（或有未保存样例）；仍可手动复制。";preview.showModal()}catch(e){status.textContent=String(e)}finally{busy=false;updateControls()}};
+btn("copy").onclick=async()=>{if(busy)return;busy=true;updateControls();try{prepared=await call<Submission>("Prepare",compiler.value.trim());el<HTMLTextAreaElement>("sourcePreview").value=prepared.text;el("verify").textContent=prepared.verified&&!dirty?"当前源码与全部已通过比较的样例一致。":"当前源码未完整验证（或有未保存样例）；仍可手动复制。";if(prepared.kitVersion)el("verify").textContent+=" Exam Kit "+prepared.kitVersion+" · 展开 "+(prepared.components?.length??0)+" 个组件。";preview.showModal()}catch(e){status.textContent=String(e)}finally{busy=false;updateControls()}};
 btn("closePreview").onclick=()=>{prepared=undefined;preview.close()};
 preview.onclose=()=>{prepared=undefined};
 btn("copyConfirm").onclick=async()=>{if(!prepared)return;btn("copyConfirm").disabled=true;try{await call("CopyPrepared",compiler.value.trim(),prepared.digest);preview.close();status.textContent="已复制当前提交源码"}catch(e){preview.close();status.textContent=String(e)}finally{btn("copyConfirm").disabled=false}};
