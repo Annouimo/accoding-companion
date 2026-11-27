@@ -21,7 +21,7 @@ const btn=(id:string)=>el<HTMLButtonElement>(id);
 const input=el<HTMLTextAreaElement>("input"),expected=el<HTMLTextAreaElement>("expected"),compare=el<HTMLInputElement>("compare"),compiler=el<HTMLInputElement>("compiler");
 let root="",expanded=new Set<string>(),treeEntries=new Map<string,Entry[]>(),refreshing=false,navEpoch=0,seenMissing=new Set<string>();
 const compilerByLanguage:Record<string,string>={c:"",cpp:""};
-let editorPath="",prepared:Submission|undefined,runningTest=false,dropCheck=false;
+let editorPath="",prepared:Submission|undefined,runningTest=false,dropCheck=false,progressCheck=false;
 const language=(s:Source)=>/\.c$/i.test(s.name)?"c":"cpp";
 const status=el("status"),result=el("result"),stale=el("stale");
 const labels:Record<string,string>={completed:"测试完成",passed:"通过",mismatch:"输出不一致",ran:"已运行（无预期）",compilation_failed:"编译失败",runtime_failed:"运行失败",timeout:"超时",cancelled:"已取消",output_limit:"输出超限"};
@@ -54,7 +54,7 @@ async function select(nav:Nav){
  el("folder").textContent=root;
  source=nav.source.path?nav.source:undefined;cases=[];selected=0;last=undefined;dirty=false;loaded=false;result.hidden=true;el("orphans").replaceChildren();
  el("title").textContent=source?.name??"选择一个源文件";el("path").textContent=source?.path??root;el("work").hidden=!source;
- if(source){compiler.value=compilerByLanguage[language(source)];const wasMissing=seenMissing.has(source.path);if(wasMissing)await call("Invalidate",source.path);await reload();
+ if(source){let dir=source.directory;while(dir&&dir!==root){expanded.add(dir);const next=dir.replace(/[\\/][^\\/]+$/,"");if(next===dir||next.length<root.length)break;dir=next}compiler.value=compilerByLanguage[language(source)];const wasMissing=seenMissing.has(source.path);if(wasMissing)await call("Invalidate",source.path);await reload();
   if(seenMissing.has(source.path)&&revision!=="missing"){if(!confirm("此路径曾消失，存在旧测试数据。是否继续使用这些样例？")){loaded=false;status.textContent="未确认旧样例；请重新选择文件";}else seenMissing.delete(source.path)}
   if(loaded){const cached=await call<Result|null>("Cached",compiler.value.trim());if(cached){if(seenMissing.has(source.path))cached.stale=true;show(cached)}await showOrphans()}
  }
@@ -144,7 +144,7 @@ btn("import").onclick=()=>void navigate(async()=>{if(!loaded)return;const append
 setInterval(()=>{void refreshTree()},1500);
 setInterval(async()=>{
  if(!runtime)return;
- if(runningTest){try{const p=await call<Progress>("Progress");if(!runningTest)return;const bar=el<HTMLProgressElement>("progress");if(p.phase==="compiling"){bar.removeAttribute("value");status.textContent="正在编译…"}else if(p.phase==="running"){bar.max=Math.max(1,p.total);bar.value=p.completed;status.textContent="正在运行 "+p.completed+" / "+p.total+" 组"}}catch{}}
+ if(runningTest&&!progressCheck){progressCheck=true;try{const p=await call<Progress>("Progress");if(!runningTest)return;const bar=el<HTMLProgressElement>("progress");if(p.phase==="compiling"){bar.removeAttribute("value");status.textContent="正在编译…"}else if(p.phase==="running"){bar.max=Math.max(1,p.total);bar.value=p.completed;status.textContent="正在运行 "+p.completed+" / "+p.total+" 组"}}catch{}finally{progressCheck=false}}
  if(dropCheck)return;dropCheck=true;
  try{const p=await call<string[]|null>("TakeDrop");if(!p?.length)return;if(p.length!==1){status.textContent="一次仅支持拖入一个文件或文件夹";return}if(busy||el<HTMLDialogElement>("preview").open||el<HTMLDialogElement>("config").open){status.textContent="请结束当前操作后重新拖入";return}await navigate(async()=>select(await call<Nav>("OpenDropped",p[0])))}catch(e){status.textContent=String(e)}finally{dropCheck=false}
 },300);
@@ -170,7 +170,7 @@ btn("save").onclick=async()=>{busy=true;updateControls();try{await save()}catch(
 btn("run").onclick=()=>void run(false);btn("all").onclick=()=>void run(true);
 btn("cancel").onclick=async()=>{btn("cancel").disabled=true;try{await call("Cancel")}catch(e){status.textContent=String(e)}};
 window.addEventListener("focus",async()=>{if(last&&!busy&&!dirty){const id=last.runId;try{if(!(await call<boolean>("IsCurrent",compiler.value.trim()))&&last?.runId===id)markStale()}catch{markStale()}}});
-document.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="Enter"&&!busy&&source){e.preventDefault();void run(false)}});
+document.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="Enter"&&!busy&&source&&!preview.open&&!config.open){e.preventDefault();void run(false)}});
 window.addEventListener("beforeunload",e=>{if(dirty){e.preventDefault();e.returnValue=""}});
 async function boot(){try{const path="/wails/runtime.js";runtime=await import(path) as Runtime;if(typeof runtime.Call?.ByName!=="function")throw Error("运行时不可用");const cfg=await call<Settings>("Config");compilerByLanguage.c=cfg.c;compilerByLanguage.cpp=cfg.cpp;editorPath=cfg.editor;status.textContent="请选择 C/C++ 文件";updateControls();await select(await call<Nav>("Initial"));const warning=await call<string>("ConfigWarning");if(warning)status.textContent="配置读取失败："+warning}catch(e){runtime=undefined;status.textContent="无法连接本地应用："+String(e);updateControls()}}
 void boot();
