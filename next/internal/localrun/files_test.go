@@ -41,3 +41,15 @@ func TestCPP(t *testing.T){
  r,e:=Run(context.Background(),q,"","")
  if e!=nil||r.State!="ran"||r.Execution==nil||r.Execution.Stdout!="42"{t.Fatalf("%+v %v",r,e)}
 }
+
+func TestImportAppendAndSeparateExtensions(t *testing.T){
+ p:=source(t,"int main(void){return 0;}")
+ root,_:=OpenDirectory(filepath.Dir(p))
+ q,e:=CreateSource(root,root,"A.cpp");if e!=nil{t.Fatal(e)}
+ cs,e:=SaveCases(p,[]Case{{"one",nil}},"missing");if e!=nil{t.Fatal(e)}
+ cp,_:=casePath(p)
+ got,e:=ImportCases(q.Path,cp,"missing",false);if e!=nil||len(got.Cases)!=1{t.Fatalf("%+v %v",got,e)}
+ if _,e=ImportCases(q.Path,cp,got.Revision,false);e==nil{t.Fatal("implicit overwrite")}
+ got,e=ImportCases(q.Path,cp,got.Revision,true);if e!=nil||len(got.Cases)!=2{t.Fatalf("%+v %v",got,e)}
+ original,e:=LoadCases(p);if e!=nil||original.Revision!=cs.Revision{t.Fatal("original changed")}
+}

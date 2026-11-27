@@ -104,6 +104,18 @@ func(d *Desktop) remember(r localrun.BatchResult){
  // Keep only a small session cache; a result may contain large outputs.
  for len(d.order)>4{delete(d.last,d.order[0]);d.order=d.order[1:]}
 }
+// CheckSelected validates the current path even if its parent is collapsed.
+func(d *Desktop) CheckSelected()(bool,error){
+ d.mu.Lock();defer d.mu.Unlock()
+ if d.selected.Path==""{return false,nil}
+ _,e:=localrun.Within(d.root,d.selected.Path)
+ if e==nil{_,e=localrun.Open(d.selected.Path)}
+ if e!=nil{delete(d.last,d.selected.Path);return false,nil}
+ return true,nil
+}
+func(d *Desktop) Invalidate(path string){
+ d.mu.Lock();defer d.mu.Unlock();delete(d.last,path)
+}
 func(d *Desktop) LoadCases()(localrun.CaseSet,error){
  d.mu.Lock();defer d.mu.Unlock()
  if d.selected.Path==""{return localrun.CaseSet{},errors.New("请选择源文件")}

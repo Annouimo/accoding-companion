@@ -15,7 +15,7 @@ let runtime:Runtime|undefined,source:Source|undefined,busy=false,dirty=false,loa
 const el=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;
 const btn=(id:string)=>el<HTMLButtonElement>(id);
 const input=el<HTMLTextAreaElement>("input"),expected=el<HTMLTextAreaElement>("expected"),compare=el<HTMLInputElement>("compare"),compiler=el<HTMLInputElement>("compiler");
-let root="",expanded=new Set<string>(),treeEntries=new Map<string,Entry[]>(),refreshing=false,navEpoch=0,seenMissing=new Set<string>(),knownFiles=new Set<string>();
+let root="",expanded=new Set<string>(),treeEntries=new Map<string,Entry[]>(),refreshing=false,navEpoch=0,seenMissing=new Set<string>();
 const compilerByLanguage:Record<string,string>={c:"",cpp:""};
 const language=(s:Source)=>/\.c$/i.test(s.name)?"c":"cpp";
 const status=el("status"),result=el("result"),stale=el("stale");
@@ -45,11 +45,11 @@ async function reload(){loaded=false;updateControls();try{applySet(await call<Ca
 async function select(nav:Nav){
  if(!nav.root)return;
  navEpoch++;
- if(root!==nav.root){root=nav.root;expanded=new Set([root]);treeEntries.clear();knownFiles.clear();seenMissing.clear()}
+ if(root!==nav.root){root=nav.root;expanded=new Set([root]);treeEntries.clear();seenMissing.clear()}
  el("folder").textContent=root;
  source=nav.source.path?nav.source:undefined;cases=[];selected=0;last=undefined;dirty=false;loaded=false;result.hidden=true;el("orphans").replaceChildren();
  el("title").textContent=source?.name??"选择一个源文件";el("path").textContent=source?.path??root;el("work").hidden=!source;
- if(source){compiler.value=compilerByLanguage[language(source)];await reload();
+ if(source){compiler.value=compilerByLanguage[language(source)];const wasMissing=seenMissing.has(source.path);if(wasMissing)await call("Invalidate",source.path);await reload();
   if(seenMissing.has(source.path)&&revision!=="missing"){if(!confirm("此路径曾消失，存在旧测试数据。是否继续使用这些样例？")){loaded=false;status.textContent="未确认旧样例；请重新选择文件";}else seenMissing.delete(source.path)}
   if(loaded){const cached=await call<Result|null>("Cached",compiler.value.trim());if(cached){if(seenMissing.has(source.path))cached.stale=true;show(cached)}await showOrphans()}
  }
@@ -84,17 +84,20 @@ async function refreshTree(force=false){
    if(epoch!==navEpoch)return;next.set(dir,list);
    for(const e of list){if(!e.directory)present.add(e.path);else if(expanded.has(e.path))queue.push(e.path)}
   }
-  for(const [dir,entries] of next){const old=treeEntries.get(dir)??[];for(const e of old){if(!e.directory&&!present.has(e.path))seenMissing.add(e.path)}}
-  for(const p of present)knownFiles.add(p);
+  for(const [dir,entries] of next){const old=treeEntries.get(dir)??[];for(const e of old){if(!e.directory&&!present.has(e.path)){seenMissing.add(e.path);await call("Invalidate",e.path);if(epoch!==navEpoch)return}}}
   const changed=JSON.stringify([...next])!==JSON.stringify([...treeEntries]);treeEntries=next;if(changed||force)drawTree();
   el("treeNotice").textContent=queue.length?"展开目录过多，最多刷新 128 个目录。":"";
-  if(source&&treeEntries.has(source.directory)&&!present.has(source.path)){seenMissing.add(source.path);markStale();loaded=false;updateControls();status.textContent="源文件已移走或删除；样例仍保留。"}
+  if(source&&!busy){
+   const selectedPath=source.path;const exists=await call<boolean>("CheckSelected");
+   if(epoch!==navEpoch||source?.path!==selectedPath)return;
+   if(!exists){seenMissing.add(selectedPath);markStale();loaded=false;updateControls();status.textContent="源文件已移走或删除；样例仍保留。"}
+  }
   if(last&&source&&!dirty&&!busy){const id=last.runId;if(!(await call<boolean>("IsCurrent",compiler.value.trim()))&&last?.runId===id&&epoch===navEpoch)markStale()}
  }catch(e){el("treeNotice").textContent=String(e);markStale()}finally{refreshing=false}
 }
 async function navigate(action:()=>Promise<void>){
  if(busy||dirty&&!confirm("放弃尚未保存的样例修改？"))return;
- busy=true;updateControls();drawTree();try{await action()}catch(e){status.textContent=String(e)}finally{busy=false;updateControls();drawTree();void refreshTree(true)}
+ busy=true;navEpoch++;updateControls();drawTree();try{await action()}catch(e){status.textContent=String(e)}finally{busy=false;updateControls();drawTree();void refreshTree(true)}
 }
 async function save(){if(!dirty)return;applySet(await call<CaseSet>("SaveCases",cases,revision));status.textContent="测试数据已保存";}
 function node(tag:string,text:string,cls=""){const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n;}
@@ -132,7 +135,7 @@ btn("new").onclick=()=>void navigate(async()=>{
 btn("rename").onclick=()=>void navigate(async()=>{if(!source)return;const name=prompt("新文件名",source.name);if(name&&name!==source.name)await select(await call<Nav>("Rename",name))});
 btn("import").onclick=()=>void navigate(async()=>{if(!loaded)return;const append=cases.length>0;if(append&&!confirm("将导入的测试数据追加到现有样例？"))return;const s=await call<CaseSet|null>("Import",revision,append);if(s){applySet(s);markStale();await showOrphans()}});
 setInterval(()=>{void refreshTree()},1500);
-btn("reload").onclick=()=>void navigate(async()=>{markStale();await reload();if(source&&seenMissing.has(source.path)&&revision!=="missing"){if(!confirm("此路径曾消失，是否继续使用旧样例？")){loaded=false;return}seenMissing.delete(source.path)}await showOrphans()});
+btn("reload").onclick=()=>void navigate(async()=>{markStale();if(source&&seenMissing.has(source.path))await call("Invalidate",source.path);await reload();if(source&&seenMissing.has(source.path)&&revision!=="missing"){if(!confirm("此路径曾消失，是否继续使用旧样例？")){loaded=false;return}seenMissing.delete(source.path)}await showOrphans()});
 btn("add").onclick=()=>{cases.push({input:"",expected:null});selected=cases.length-1;changes();renderCases()};
 btn("remove").onclick=()=>{if(!confirm("删除当前样例？保存后才会写入磁盘。"))return;cases.splice(selected,1);selected=Math.max(0,Math.min(selected,cases.length-1));changes();renderCases()};
 input.oninput=()=>{if(cases[selected]){cases[selected].input=input.value;changes()}};
